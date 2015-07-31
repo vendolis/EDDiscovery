@@ -31,9 +31,23 @@ namespace EDDiscovery
 
         public void Set(SystemClass system)
         {
-            if (TargetSystem != null && TargetSystem.Equals(system)) return;
-            TargetSystem = system;
-            ClearDataGridViewDistancesRows();
+            if (TargetSystem == null || !TargetSystem.Equals(system))
+            {
+                TargetSystem = system;
+                ClearDataGridViewDistancesRows();
+            }
+
+            if (TargetSystem == null) return;
+
+            textBoxSystemName.Text = TargetSystem.name;
+            labelStatus.Text = "Enter Distances";
+            labelStatus.BackColor = Color.LightBlue;
+
+            UnfreezeTrilaterationUI();
+            dataGridViewDistances.Focus();
+
+            PopulateSuggestedSystems();
+            PopulateClosestSystems();
         }
 
         private List<SystemClass> GetEnteredSystems()
@@ -149,44 +163,6 @@ namespace EDDiscovery
 
             // trigger trilateration calculation
             RunTrilateration();
-        }
-
-        private void TrilaterationControl_VisibleChanged(object sender, EventArgs e)
-        {
-            if (Visible && TargetSystem != null)
-            {
-                textBoxSystemName.Text = TargetSystem.name;
-                labelStatus.Text = "Enter Distances";
-                labelStatus.BackColor = Color.LightBlue;
-
-                UnfreezeTrilaterationUI();
-                dataGridViewDistances.Focus();
-
-                PopulateSuggestedSystems();
-                PopulateClosestSystems();
-            }
-
-            if (!Visible)
-            {
-                if (trilaterationThread != null)
-                {
-                    trilaterationThread.Abort();
-                    trilaterationThread = null;
-                }
-
-                textBoxSystemName.Text = null;
-                textBoxCoordinateX.Text = "?";
-                textBoxCoordinateY.Text = "?";
-                textBoxCoordinateZ.Text = "?";
-                labelLastKnownSystem.Text = "Unknown";
-
-                ClearDataGridViewDistancesRows();
-                ClearDataGridViewClosestSystemsRows();
-                ClearDataGridViewSuggestedSystemsRows();
-
-                lastTrilatelationResult = null;
-                lastTrilatelationEntries = null;
-            }
         }
 
         private void RunTrilateration()
