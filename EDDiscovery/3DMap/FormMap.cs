@@ -18,6 +18,7 @@ namespace EDDiscovery2
 {
         public partial class FormMap : Form
         {
+            private readonly AutoCompleteStringCollection _systemNames;
             bool loaded = false;
 
             float x = 0;
@@ -39,12 +40,13 @@ namespace EDDiscovery2
             private List<IData3DSet> datasets;
 
 
-            public FormMap()
+            public FormMap(AutoCompleteStringCollection SystemNames)
             {
+                _systemNames = SystemNames;
                 InitializeComponent();
             }
 
-            public FormMap(SystemClass centerSystem) : this()
+            public FormMap(SystemClass centerSystem, AutoCompleteStringCollection SystemNames) : this(SystemNames)
             {
                 if (centerSystem !=null && centerSystem.HasCoordinate) CenterSystem = centerSystem;
             }
@@ -502,7 +504,7 @@ namespace EDDiscovery2
 
             private void FormMap_Load(object sender, EventArgs e)
             {
-                textBox_From.AutoCompleteCustomSource = EDDiscoveryForm.SystemNames;
+                textBox_From.AutoCompleteCustomSource = _systemNames;
                 ShowCenterSystem();
                 GenerateDataSets();
                 //GenerateDataSetsAllegiance();

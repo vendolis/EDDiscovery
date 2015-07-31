@@ -48,7 +48,6 @@
             this.buttonMap = new System.Windows.Forms.Button();
             this.textBoxSystem = new System.Windows.Forms.TextBox();
             this.panel1 = new System.Windows.Forms.Panel();
-            this.buttonTrilaterate = new System.Windows.Forms.Button();
             this.buttonRoss = new System.Windows.Forms.Button();
             this.buttonEDDB = new System.Windows.Forms.Button();
             this.textBoxState = new System.Windows.Forms.TextBox();
@@ -188,6 +187,7 @@
             "Week",
             "2 Weeks",
             "Month",
+            "Last 20",
             "All"});
             this.comboBoxHistoryWindow.Location = new System.Drawing.Point(259, 8);
             this.comboBoxHistoryWindow.Name = "comboBoxHistoryWindow";
@@ -263,7 +263,6 @@
             // 
             // panel1
             // 
-            this.panel1.Controls.Add(this.buttonTrilaterate);
             this.panel1.Controls.Add(this.buttonRoss);
             this.panel1.Controls.Add(this.buttonEDDB);
             this.panel1.Controls.Add(this.textBoxState);
@@ -295,16 +294,6 @@
             this.panel1.Name = "panel1";
             this.panel1.Size = new System.Drawing.Size(293, 235);
             this.panel1.TabIndex = 16;
-            // 
-            // buttonTrilaterate
-            // 
-            this.buttonTrilaterate.Location = new System.Drawing.Point(168, 186);
-            this.buttonTrilaterate.Name = "buttonTrilaterate";
-            this.buttonTrilaterate.Size = new System.Drawing.Size(99, 22);
-            this.buttonTrilaterate.TabIndex = 41;
-            this.buttonTrilaterate.Text = "Trilaterate";
-            this.buttonTrilaterate.UseVisualStyleBackColor = true;
-            this.buttonTrilaterate.Click += new System.EventHandler(this.buttonTrilaterate_Click);
             // 
             // buttonRoss
             // 
@@ -735,7 +724,6 @@
         private System.Windows.Forms.Button buttonEDDB;
         private System.Windows.Forms.ToolTip toolTipEddb;
         private System.Windows.Forms.Button buttonRoss;
-        private System.Windows.Forms.Button buttonTrilaterate;
         private System.Windows.Forms.Label labelDistanceToNextSystem;
         private System.Windows.Forms.TextBox textBoxDistanceToNextSystem;
         private System.Windows.Forms.Panel panelRight;

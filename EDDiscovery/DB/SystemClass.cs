@@ -23,7 +23,7 @@ namespace EDDiscovery.DB
 
 
     [DebuggerDisplay("System {name} ({x,nq},{y,nq},{z,nq})")]
-    public class SystemClass
+    public class SystemClass : IEquatable<SystemClass>
     {
         public int id;
         public string name;
@@ -493,5 +493,10 @@ namespace EDDiscovery.DB
             }
         }
 
+        public bool Equals(SystemClass other)
+        {
+            if (other == null) return false;
+            return other.name == name;
+        }
     }
 }

@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -22,15 +23,13 @@ namespace EDDiscovery
 
     public class NetLogClass
     {
-        public List<SystemPosition> visitedSystems = new List<SystemPosition>();
-        Dictionary<string, NetLogFileInfo> netlogfiles = new Dictionary<string, NetLogFileInfo>();
+        public readonly List<SystemPosition> visitedSystems = new List<SystemPosition>();
+        readonly Dictionary<string, NetLogFileInfo> netlogfiles = new Dictionary<string, NetLogFileInfo>();
         FileSystemWatcher m_Watcher;
         Thread ThreadNetLog;
         bool Exit = false;
         bool NoEvents = false;
         public event NetLogEventHandler OnNewPosition;
-
-        
 
         public string GetNetLogPath()
         {
@@ -39,7 +38,7 @@ namespace EDDiscovery
                 string datapath = null;
                 if (EDDiscovery2.Properties.Settings.Default.NetlogDirAutoMode)
                 {
-                    if (EliteDangerous.EDDirectory != null && EliteDangerous.EDDirectory.Length > 0)
+                    if (!string.IsNullOrEmpty(EliteDangerous.EDDirectory))
                     {
                         datapath = Path.Combine(EliteDangerous.EDDirectory, "Logs");
                         return datapath;
@@ -299,24 +298,16 @@ namespace EDDiscovery
 
                     EliteDangerous.CheckED();
 
-                    if (NoEvents == false)
-                    {
-                        if (lastnfi != null)
-                        {
-                            FileInfo fi = new FileInfo(lastnfi.FileName);
+                    if (NoEvents || lastnfi == null) continue;
 
-                            if (fi.Length != lastnfi.fileSize)
-                                ParseFile(fi, visitedSystems);
-                            else
-                            {
-                                //System.Diagnostics.Trace.WriteLine("No change");
-                            }
-                        }
-                    }
+                    FileInfo fi = new FileInfo(lastnfi.FileName);
+
+                    if (fi.Length != lastnfi.fileSize)
+                        ParseFile(fi, visitedSystems);
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Trace.WriteLine("NetlogMAin exception : " + ex.Message);
+                    System.Diagnostics.Trace.WriteLine("NetlogMain exception : " + ex.Message);
                     System.Diagnostics.Trace.WriteLine(ex.StackTrace);
                 }
 

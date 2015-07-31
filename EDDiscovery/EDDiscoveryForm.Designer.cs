@@ -1,4 +1,6 @@
-﻿namespace EDDiscovery
+﻿using System;
+
+namespace EDDiscovery
 {
     partial class EDDiscoveryForm
     {
@@ -32,9 +34,9 @@
             this.folderBrowserDialog1 = new System.Windows.Forms.FolderBrowserDialog();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabPageTravelHistory = new System.Windows.Forms.TabPage();
-            this.travelHistoryControl1 = new EDDiscovery.TravelHistoryControl();
+            this.travelHistoryControl1 = new EDDiscovery.TravelHistoryControl(this);
+            this.TrilaterationControl = new TrilaterationControl(this);
             this.tabPageTriletaration = new System.Windows.Forms.TabPage();
-            this.TrilaterationControl = new EDDiscovery.TrilaterationControl();
             this.tabPage2 = new System.Windows.Forms.TabPage();
             this.routeControl1 = new EDDiscovery.RouteControl();
             this.tabPage3 = new System.Windows.Forms.TabPage();
@@ -80,6 +82,7 @@
             this.tabControl1.SelectedIndex = 0;
             this.tabControl1.Size = new System.Drawing.Size(905, 593);
             this.tabControl1.TabIndex = 15;
+            this.tabControl1.SelectedIndexChanged += TabControl1OnSelectedIndexChanged;
             // 
             // tabPageTravelHistory
             // 
@@ -111,6 +114,7 @@
             this.tabPageTriletaration.TabIndex = 3;
             this.tabPageTriletaration.Text = "Trilateration";
             this.tabPageTriletaration.UseVisualStyleBackColor = true;
+            this.tabPageTriletaration.Enabled = false;
             // 
             // TrilaterationControl
             // 
@@ -249,7 +253,7 @@
             this.showLogfilesToolStripMenuItem,
             this.statisticsToolStripMenuItem});
             this.toolsToolStripMenuItem.Name = "toolsToolStripMenuItem";
-            this.toolsToolStripMenuItem.Size = new System.Drawing.Size(48, 20);
+            this.toolsToolStripMenuItem.Size = new System.Drawing.Size(47, 20);
             this.toolsToolStripMenuItem.Text = "Tools";
             // 
             // addNewStarToolStripMenuItem

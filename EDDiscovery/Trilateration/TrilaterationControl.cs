@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using EDDiscovery.DB;
+using EDDiscovery2;
 using ThreadState = System.Threading.ThreadState;
 using EDDiscovery2.Trilateration;
 
@@ -15,17 +16,26 @@ namespace EDDiscovery
 {
     public partial class TrilaterationControl : UserControl
     {
-        public SystemClass TargetSystem;
+        private readonly EDDiscoveryForm _discoveryForm;
+        private SystemClass TargetSystem;
         private Thread trilaterationThread;
         private Trilateration.Result lastTrilatelationResult;
         private Dictionary<SystemClass, Trilateration.Entry> lastTrilatelationEntries;
         private Thread EDSCSubmissionThread;
 
-        public TrilaterationControl()
+        public TrilaterationControl(EDDiscoveryForm discoveryForm)
         {
+            _discoveryForm = discoveryForm;
             InitializeComponent();
         }
-        
+
+        public void Set(SystemClass system)
+        {
+            if (TargetSystem != null && TargetSystem.Equals(system)) return;
+            TargetSystem = system;
+            ClearDataGridViewDistancesRows();
+        }
+
         private List<SystemClass> GetEnteredSystems()
         {
             var systems = new List<SystemClass>();
@@ -303,7 +313,7 @@ namespace EDDiscovery
                         TargetSystem.y = trilaterationResult.Coordinate.Y;
                         TargetSystem.z = trilaterationResult.Coordinate.Z;
                     }
-
+                    ux3DView.Enabled = (TargetSystem != null);
 
                 });
 
@@ -525,7 +535,7 @@ namespace EDDiscovery
             get
             {
                 var lastKnown = (from systems
-                    in EDDiscoveryForm.TravelControl.visitedSystems
+                    in _discoveryForm.visitedSystems
                     where systems.curSystem != null && systems.curSystem.HasCoordinate
                     orderby systems.time descending
                     select systems.curSystem).FirstOrDefault();
@@ -587,7 +597,7 @@ namespace EDDiscovery
 
         private void SubmitToEDSC()
         {
-            var travelHistoryControl = EDDiscoveryForm.TravelControl;
+            var travelHistoryControl = _discoveryForm.TravelControl;
             string commanderName = travelHistoryControl.GetCommanderName();
 
             if (string.IsNullOrEmpty(commanderName))
@@ -683,15 +693,6 @@ namespace EDDiscovery
         }
 
 
-
-        private void toolStripButton1_Close(object sender, EventArgs e)
-        {
-            //Visible = false;
-            EDDiscoveryForm.ShowHistoryTab();
-        }
-
-
-
         public void LogText(string text)
         {
             LogText(text, Color.Black);
@@ -729,6 +730,18 @@ namespace EDDiscovery
             var system = (SystemClass)dataGridViewSuggestedSystems[0, e.RowIndex].Tag;
             AddSystemToDataGridViewDistances(system);
             dataGridViewSuggestedSystems.Rows.RemoveAt(e.RowIndex);
+        }
+
+        private void ux3DView_Click(object sender, EventArgs e)
+        {
+            var centerSystem = TargetSystem;
+            if (centerSystem == null || !centerSystem.HasCoordinate) centerSystem = LastKnownSystem;
+            var map2 = new FormMap(centerSystem, _discoveryForm.SystemNames)
+            {
+                ReferenceSystems = CurrentReferenceSystems.ToList(),
+                visitedSystems = _discoveryForm.visitedSystems
+            };
+            map2.Show();
         }
     }
 }

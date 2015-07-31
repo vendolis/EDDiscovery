@@ -27,11 +27,8 @@ namespace EDDiscovery
 
     public partial class EDDiscoveryForm : Form
     {
-        static public  AutoCompleteStringCollection SystemNames = new AutoCompleteStringCollection();
-        static public string CommanderName;
-        private static TrilaterationControl sTrilControl;
-        private static TravelHistoryControl  sTravelControl;
-        private static EDDiscoveryForm sEDDiscoveryForm;
+        public AutoCompleteStringCollection SystemNames = new AutoCompleteStringCollection();
+        public string CommanderName;
 
         string fileTgcSystems ;
         string fileTgcDistances;
@@ -46,34 +43,37 @@ namespace EDDiscovery
             fileTgcDistances = Path.Combine(Tools.GetAppDataDirectory(), "tgcdistances.json");
         }
 
-
-        static public TrilaterationControl TrilControl
+        public TravelHistoryControl TravelControl
         {
-            get { return sTrilControl; }
+            get { return travelHistoryControl1; }
         }
 
-        static public TravelHistoryControl TravelControl
+        public bool TrilTabEnabled
         {
-            get { return sTravelControl; }
+            set { tabPageTriletaration.Enabled = value; }
         }
 
+        private void TabControl1OnSelectedIndexChanged(object sender, EventArgs eventArgs)
+        {
+            if (tabControl1.SelectedIndex == 1)
+            {
+                TrilaterationControl.Set(travelHistoryControl1.GetCurrentSystem());
+            }
+        }
 
-        static internal void ShowTrilaterationTab()
-        {
-            sEDDiscoveryForm.tabControl1.SelectedIndex = 1;
-        }
-        static internal void ShowHistoryTab()
-        {
-            sEDDiscoveryForm.tabControl1.SelectedIndex = 0;
-        }
+        //static internal void ShowTrilaterationTab()
+        //{
+        //    sEDDiscoveryForm.tabControl1.SelectedIndex = 1;
+        //}
+        //static internal void ShowHistoryTab()
+        //{
+        //    sEDDiscoveryForm.tabControl1.SelectedIndex = 0;
+        //}
 
         private void Form1_Load(object sender, EventArgs e)
         {
             try
             {
-                sTrilControl = TrilaterationControl;
-                sTravelControl = travelHistoryControl1;
-                sEDDiscoveryForm = this;
                 // Click once   System.Deployment.Application.ApplicationDeployment.CurrentDeployment.CurrentVe‌​rsion
                 var assemblyFullName = Assembly.GetExecutingAssembly().FullName;
                 var version = assemblyFullName.Split(',')[1].Split('=')[1];
@@ -84,12 +84,8 @@ namespace EDDiscovery
                 panelInfo.Visible = true;
                 panelInfo.BackColor = Color.Gold;
 
-
-
                 SystemData sdata = new SystemData();
                 routeControl1.travelhistorycontrol1 = travelHistoryControl1;
-
-
 
                 string datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\Frontier_Developments\\Products"; // \\FORC-FDEV-D-1001\\Logs\\";
 
@@ -98,13 +94,10 @@ namespace EDDiscovery
                 if (EDDiscovery2.Properties.Settings.Default.Netlogdir.Equals(""))
                     EDDiscovery2.Properties.Settings.Default.Netlogdir = datapath;
 
-
                 if (EDDiscovery2.Properties.Settings.Default.NetlogDirAutoMode)
                 {
                     textBoxNetLogDir.Text = datapath;
-
                     radioButton_Auto.Checked = true;
-
                 }
                 else
                 {
@@ -357,6 +350,12 @@ namespace EDDiscovery
         }
 
         private Thread ThreadEDDB;
+
+        public List<SystemPosition> visitedSystems
+        {
+            get { return travelHistoryControl1.visitedSystems; }
+        }
+
         private void GetEDDBAsync()
         {
             ThreadEDDB = new System.Threading.Thread(new System.Threading.ThreadStart(GetEDDBUpdate));
@@ -665,13 +664,17 @@ namespace EDDiscovery
 
         private void button_Save_Click(object sender, EventArgs e)
         {
-            EDDiscovery2.Properties.Settings.Default.Netlogdir = textBoxNetLogDir.Text;
-            EDDiscovery2.Properties.Settings.Default.NetlogDirAutoMode = radioButton_Auto.Checked;
-
-            EDDiscovery2.Properties.Settings.Default.Save();
+            SaveSettings();
 
             tabControl1.SelectedTab = tabPageTravelHistory;
             travelHistoryControl1.RefreshHistory();
+        }
+
+        private void SaveSettings()
+        {
+            EDDiscovery2.Properties.Settings.Default.Netlogdir = textBoxNetLogDir.Text;
+            EDDiscovery2.Properties.Settings.Default.NetlogDirAutoMode = radioButton_Auto.Checked;
+            EDDiscovery2.Properties.Settings.Default.Save();
         }
 
         private void routeControl1_Load(object sender, EventArgs e)
@@ -682,6 +685,7 @@ namespace EDDiscovery
         private void EDDiscoveryForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             travelHistoryControl1.netlog.StopMonitor();
+            SaveSettings();
         }
 
         private void travelHistoryControl1_Load(object sender, EventArgs e)
@@ -842,6 +846,7 @@ namespace EDDiscovery
                 }
             }
         }
+
 
 
 

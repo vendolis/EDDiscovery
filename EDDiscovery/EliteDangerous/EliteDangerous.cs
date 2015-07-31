@@ -233,24 +233,15 @@ Trinkets_Of_Hidden_Fortune,
                 {
                 }
 
-                if (processFilename != null && (EDFileName==null || !EDFileName.Equals(processes[0].MainModule.FileName)))
+                if (processFilename != null && (EDFileName == null || !EDFileName.Equals(processes[0].MainModule.FileName)))
                 {
                     EDFileName = processes[0].MainModule.FileName;
                     EDDirectory = Path.GetDirectoryName(EDFileName);
 
                     SQLiteDBClass db = new SQLiteDBClass();
 
-                    if (EDDirectory.Contains("PUBLIC_TEST_SERVER")) // BETA
-                    {
-                        db.PutSettingString("EDDirectoryBeta", EDDirectory);
-                        Beta = true;
-                    }
-                    else
-                    {
-                        Beta = false;
-                        db.PutSettingString("EDDirectory", EDDirectory);
-                    }
-                    
+                    Beta = EDDirectory.Contains("PUBLIC_TEST_SERVER");
+                    db.PutSettingString(Beta ? "EDDirectoryBeta" : "EDDirectory", EDDirectory);
                 }
 
                 try
@@ -262,6 +253,7 @@ Trinkets_Of_Hidden_Fortune,
                 }
 
                 EDRunning = true;
+
 
             }
 
@@ -294,7 +286,6 @@ Trinkets_Of_Hidden_Fortune,
 
             if (EDDirectory.Equals(""))
                 return true;
-
 
             if (!Directory.Exists(EDDirectory)) // For safety.
                 return true;
