@@ -23,7 +23,7 @@ namespace EDDiscovery
 {
     public partial class TravelHistoryControl : UserControl
     {
-        string datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\Frontier_Development_s\\Products"; // \\FORC-FDEV-D-1001\\Logs\\";
+		string datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + Path.DirectorySeparatorChar + "Frontier_Development_s" + Path.DirectorySeparatorChar + "Products"; // \\FORC-FDEV-D-1001\\Logs\\";
         internal List<SystemPosition> visitedSystems;
 
         public NetLogClass netlog = new NetLogClass();

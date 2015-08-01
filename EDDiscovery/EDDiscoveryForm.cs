@@ -92,7 +92,7 @@ namespace EDDiscovery
 
 
 
-                string datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\Frontier_Developments\\Products"; // \\FORC-FDEV-D-1001\\Logs\\";
+				string datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + Path.DirectorySeparatorChar + "Frontier_Developments" + Path.DirectorySeparatorChar + "Products"; // \\FORC-FDEV-D-1001\\Logs\\";
 
                 EDDiscovery2.Properties.Settings.Default.Upgrade();
 
@@ -628,12 +628,12 @@ namespace EDDiscovery
             string json = null;
             try
             {
-                string appdata = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\EDDiscovery";
+				string appdata = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + Path.DirectorySeparatorChar + "EDDiscovery";
 
                 if (!Directory.Exists(appdata))
                     Directory.CreateDirectory(appdata);
 
-                string filename = appdata + "\\"+jfile;
+				string filename = appdata + Path.DirectorySeparatorChar + jfile;
                 
                 if (!File.Exists(filename))
                     return null;

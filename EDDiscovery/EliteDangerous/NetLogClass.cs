@@ -45,7 +45,7 @@ namespace EDDiscovery
                         return datapath;
                     }
 
-                    datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\Frontier_Developments\\Products"; // \\FORC-FDEV-D-1001\\Logs\\";
+					datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + Path.DirectorySeparatorChar + "Frontier_Developments"+ Path.DirectorySeparatorChar + "Products"; // \\FORC-FDEV-D-1001\\Logs\\";
 
                     // Find the right subdirectory....
 
@@ -273,7 +273,7 @@ namespace EDDiscovery
 
                 if (Directory.Exists(GetNetLogPath()))
                 {
-                    m_Watcher.Path = GetNetLogPath() + "\\";
+					m_Watcher.Path = GetNetLogPath() + Path.DirectorySeparatorChar;
                     m_Watcher.Filter = "netLog*.log";
                     m_Watcher.IncludeSubdirectories = true;
                     m_Watcher.NotifyFilter = NotifyFilters.FileName; // | NotifyFilters.Size; 
