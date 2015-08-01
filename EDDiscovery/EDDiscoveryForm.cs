@@ -2,6 +2,7 @@
 using EDDiscovery2;
 using EDDiscovery2.DB;
 using EDDiscovery2.EDDB;
+using EDDiscovery2.EDSM;
 using EMK.Cartography;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -93,6 +94,9 @@ namespace EDDiscovery
                 string datapath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Frontier_Developments\\Products"); // \\FORC-FDEV-D-1001\\Logs\\";
 
                 EDDiscovery2.Properties.Settings.Default.Upgrade();
+
+
+
 
                 if (EDDiscovery2.Properties.Settings.Default.Netlogdir.Equals(""))
                     EDDiscovery2.Properties.Settings.Default.Netlogdir = datapath;
@@ -282,7 +286,8 @@ namespace EDDiscovery
             try
             {
                 SQLiteDBClass db = new SQLiteDBClass();
-                EDSCClass edsc = new EDSCClass();
+                EDSMClass edsm = new EDSMClass();
+
 
                 string json;
 
@@ -304,7 +309,7 @@ namespace EDDiscovery
                     SystemClass.Delete(SystemStatusEnum.EDSC); // Remove all EDSC systems.
                     
                     db.PutSettingString("RWLastSystems", rwsysfiletime);
-                    db.PutSettingString("EDSCLastSystems", rwsysfiletime);
+                    db.PutSettingString("EDSMLastSystems", rwsysfiletime);
                     Invoke((MethodInvoker) delegate {
                         TravelHistoryControl.LogText("Adding data from tgcsystems.json " + Environment.NewLine);
                     });
@@ -313,7 +318,7 @@ namespace EDDiscovery
                     DBUpdateEDDB(eddb);
                 }
 
-                string retstr = edsc.EDSCGetNewSystems(db);
+                string retstr = edsm.GetNewSystems(db);
                 Invoke((MethodInvoker)delegate
                 {
                     TravelHistoryControl.LogText(retstr);
