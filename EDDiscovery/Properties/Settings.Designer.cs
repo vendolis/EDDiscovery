@@ -46,17 +46,5 @@ namespace EDDiscovery2.Properties {
                 this["NetlogDirAutoMode"] = value;
             }
         }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("4")]
-        public int History {
-            get {
-                return ((int)(this["History"]));
-            }
-            set {
-                this["History"] = value;
-            }
-        }
     }
 }

@@ -476,23 +476,27 @@ namespace EDDiscovery
         {
             //if (!this.DesignMode)
             //    RefreshHistory();
-            comboBoxHistoryWindow.SelectedIndex = Settings.Default.History;
+            var db = new SQLiteDBClass();
+            comboBoxHistoryWindow.SelectedIndex = db.GetSettingInt("EDUIHistory", 4);
 
             // this improves dataGridView's scrolling performance
-            typeof(DataGridView).InvokeMember(
+            typeof (DataGridView).InvokeMember(
                 "DoubleBuffered",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.SetProperty,
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.SetProperty,
                 null,
                 dataGridView1,
-                new object[] { true }
-            );
+                new object[] {true}
+                );
         }
 
         private void comboBoxHistoryWindow_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (visitedSystems != null)
                 RefreshHistory();
-            Settings.Default.History = comboBoxHistoryWindow.SelectedIndex;
+
+            var db = new SQLiteDBClass();
+            db.PutSettingInt("EDUIHistory", comboBoxHistoryWindow.SelectedIndex);
         }
 
 

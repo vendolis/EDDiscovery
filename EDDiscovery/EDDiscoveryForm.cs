@@ -95,9 +95,6 @@ namespace EDDiscovery
 
                 EDDiscovery2.Properties.Settings.Default.Upgrade();
 
-
-
-
                 if (EDDiscovery2.Properties.Settings.Default.Netlogdir.Equals(""))
                     EDDiscovery2.Properties.Settings.Default.Netlogdir = datapath;
 
