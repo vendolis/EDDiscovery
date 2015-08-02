@@ -114,7 +114,6 @@ namespace EDDiscovery
             this.tabPageTriletaration.TabIndex = 3;
             this.tabPageTriletaration.Text = "Trilateration";
             this.tabPageTriletaration.UseVisualStyleBackColor = true;
-            this.tabPageTriletaration.Enabled = false;
             // 
             // TrilaterationControl
             // 

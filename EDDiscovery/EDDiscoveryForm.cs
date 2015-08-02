@@ -27,18 +27,21 @@ namespace EDDiscovery
 
     public partial class EDDiscoveryForm : Form
     {
-        public AutoCompleteStringCollection SystemNames = new AutoCompleteStringCollection();
+        public readonly AutoCompleteStringCollection SystemNames = new AutoCompleteStringCollection();
         public string CommanderName;
 
-        string fileTgcSystems ;
-        string fileTgcDistances;
+        readonly string fileTgcSystems ;
+        readonly string fileTgcDistances;
 
         public event DistancesLoaded OnDistancesLoaded;
 
         public EDDiscoveryForm()
         {
             InitializeComponent();
-           
+
+            TrilTabEnabled = false;
+            tabControl1.Selecting += tabControl_Selecting;
+
             fileTgcSystems = Path.Combine(Tools.GetAppDataDirectory(), "tgcsystems.json");
             fileTgcDistances = Path.Combine(Tools.GetAppDataDirectory(), "tgcdistances.json");
         }
@@ -50,7 +53,16 @@ namespace EDDiscovery
 
         public bool TrilTabEnabled
         {
-            set { tabPageTriletaration.Enabled = value; }
+            set
+            {
+                tabPageTriletaration.Enabled = value;
+                ((Control)tabPageTriletaration).Enabled = value;
+            }
+        }
+
+        private void tabControl_Selecting(object sender, TabControlCancelEventArgs e)
+        {
+            e.Cancel = !((Control)e.TabPage).Enabled;
         }
 
         private void TabControl1OnSelectedIndexChanged(object sender, EventArgs eventArgs)
@@ -61,15 +73,6 @@ namespace EDDiscovery
             }
         }
 
-        //static internal void ShowTrilaterationTab()
-        //{
-        //    sEDDiscoveryForm.tabControl1.SelectedIndex = 1;
-        //}
-        //static internal void ShowHistoryTab()
-        //{
-        //    sEDDiscoveryForm.tabControl1.SelectedIndex = 0;
-        //}
-
         private void Form1_Load(object sender, EventArgs e)
         {
             try
@@ -77,7 +80,7 @@ namespace EDDiscovery
                 // Click once   System.Deployment.Application.ApplicationDeployment.CurrentDeployment.CurrentVe‌​rsion
                 var assemblyFullName = Assembly.GetExecutingAssembly().FullName;
                 var version = assemblyFullName.Split(',')[1].Split('=')[1];
-                Text = "EDDiscovery v" + version;
+                Text = string.Format("EDDiscovery v{0}", version);
                 EliteDangerous.CheckED();
 
                 labelPanelText.Text = "Loading. Please wait!";
@@ -87,7 +90,7 @@ namespace EDDiscovery
                 SystemData sdata = new SystemData();
                 routeControl1.travelhistorycontrol1 = travelHistoryControl1;
 
-                string datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\Frontier_Developments\\Products"; // \\FORC-FDEV-D-1001\\Logs\\";
+                string datapath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Frontier_Developments\\Products"); // \\FORC-FDEV-D-1001\\Logs\\";
 
                 EDDiscovery2.Properties.Settings.Default.Upgrade();
 
@@ -145,10 +148,8 @@ namespace EDDiscovery
             {
                 travelHistoryControl1.Enabled = false;
 
-                var redWizzardThread = new Thread(GetRedWizzardFiles);
-                redWizzardThread.Name = "Downloading Red Wizzard Files";
-                var edscThread = new Thread(GetEDSCSystems);
-                edscThread.Name = "Downloading EDSC Systems";
+                var redWizzardThread = new Thread(GetRedWizzardFiles) {Name = "Downloading Red Wizzard Files"};
+                var edscThread = new Thread(GetEDSCSystems) {Name = "Downloading EDSC Systems"};
 
                 redWizzardThread.Start();
                 edscThread.Start();
