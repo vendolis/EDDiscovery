@@ -201,9 +201,9 @@ namespace EDDiscovery.DB
                     x = (double)dr["x"];
                     y = (double)dr["y"];
                     z = (double)dr["z"];
-                    CommanderCreate = (string)dr["commandercreate"];
+                    CommanderCreate = dr["commandercreate"].ToString();
                     CreateDate = (DateTime)dr["createdate"];
-                    CommanderUpdate = (string)dr["commanderupdate"];
+                    CommanderUpdate = (string)dr["commanderupdate"].ToString();
                     UpdateDate = (DateTime)dr["updatedate"];
 
                 }
