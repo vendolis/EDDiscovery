@@ -1,0 +1,12 @@
+version: 3.2.1.{build}
+configuration: Release
+before_build:
+  - nuget restore
+build:
+  project: EDDiscovery.sln
+test_script:
+  - nunit3-console EDDiscoveryTests\bin\Release\EDDiscoveryTests.dll --result=myresults.xml;format=AppVeyor
+after_build:
+  - cmd: copy EDDiscovery\bin\Release\EDDiscovery.Portable.zip EDDiscovery.Portable.zip
+artifacts:
+  - path: EDDiscovery.Portable.zip

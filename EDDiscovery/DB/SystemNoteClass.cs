@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.SQLite;
+using System.Data.Common;
 using System.Linq;
 using System.Text;
 
@@ -10,11 +10,12 @@ namespace EDDiscovery2.DB
 {
     public class SystemNoteClass
     {
-        public int id;
-        public string Name;
+        public long id;
+        public long Journalid;              //Journalid = 0, Name set, system marker
+        public string Name;                 //Journalid <>0, Name clear, journal marker
         public DateTime Time;
         public string Note;
-
+        public long EdsmId;
 
         public SystemNoteClass()
         {
@@ -22,78 +23,121 @@ namespace EDDiscovery2.DB
 
         public SystemNoteClass(DataRow dr)
         {
-            id = (int)(long)dr["id"];
+            id = (long)dr["id"];
+            Journalid = (long)dr["journalid"];
             Name = (string)dr["Name"];
             Time = (DateTime)dr["Time"];
             Note = (string)dr["Note"];
+            EdsmId = (long)dr["EdsmId"];
         }
 
 
         public bool Add()
         {
-            using (SQLiteConnection cn = new SQLiteConnection(SQLiteDBClass.ConnectionString))
+            using (SQLiteConnectionUser cn = new SQLiteConnectionUser())
             {
-                return Add(cn);
+                bool ret = Add(cn);
+                return ret;
             }
         }
 
-        private bool Add(SQLiteConnection cn)
+        private bool Add(SQLiteConnectionUser cn)
         {
-            using (SQLiteCommand cmd = new SQLiteCommand())
+            using (DbCommand cmd = cn.CreateCommand("Insert into SystemNote (Name, Time, Note, journalid, edsmid) values (@name, @time, @note, @journalid, @edsmid)"))
             {
-                cmd.Connection = cn;
-                cmd.CommandType = CommandType.Text;
-                cmd.CommandTimeout = 30;
-                cmd.CommandText = "Insert into SystemNote (Name, Time, Note) values (@name, @time, @note)";
-                cmd.Parameters.AddWithValue("@name", Name);
-                cmd.Parameters.AddWithValue("@time", Time);
-                cmd.Parameters.AddWithValue("@note", Note);
+                cmd.AddParameterWithValue("@name", Name);
+                cmd.AddParameterWithValue("@time", Time);
+                cmd.AddParameterWithValue("@note", Note);
+                cmd.AddParameterWithValue("@journalid", Journalid);
+                cmd.AddParameterWithValue("@edsmid", EdsmId);
 
-                SQLiteDBClass.SqlNonQueryText(cn, cmd);
+                SQLiteDBClass.SQLNonQueryText(cn, cmd);
 
-                using (SQLiteCommand cmd2 = new SQLiteCommand())
+                using (DbCommand cmd2 = cn.CreateCommand("Select Max(id) as id from SystemNote"))
                 {
-                    cmd2.Connection = cn;
-                    cmd2.CommandType = CommandType.Text;
-                    cmd2.CommandTimeout = 30;
-                    cmd2.CommandText = "Select Max(id) as id from SystemNote";
-
-                    id = (int)(long)SQLiteDBClass.SqlScalar(cn, cmd2);
+                    id = (long)SQLiteDBClass.SQLScalar(cn, cmd2);
                 }
 
-
-                SQLiteDBClass.globalSystemNotes[Name.ToLower()]= this;
+                globalSystemNotes.Add(this);
                 return true;
             }
         }
 
         public bool Update()
         {
-            using (SQLiteConnection cn = new SQLiteConnection(SQLiteDBClass.ConnectionString))
+            using (SQLiteConnectionUser cn = new SQLiteConnectionUser())
             {
                 return Update(cn);
             }
         }
 
-        private bool Update(SQLiteConnection cn)
+        private bool Update(SQLiteConnectionUser cn)
         {
-            using (SQLiteCommand cmd = new SQLiteCommand())
+            using (DbCommand cmd = cn.CreateCommand("Update SystemNote set Name=@Name, Time=@Time, Note=@Note, Journalid=@journalid, EdsmId=@EdsmId  where ID=@id")) 
             {
-                cmd.Connection = cn;
-                cmd.CommandType = CommandType.Text;
-                cmd.CommandTimeout = 30;
-                cmd.CommandText = "Update SystemNote set Name=@Name, Time=@Time, Note=@Note  where ID=@id";
-                cmd.Parameters.AddWithValue("@ID", id);
-                cmd.Parameters.AddWithValue("@Name", Name);
-                cmd.Parameters.AddWithValue("@Note", Note);
-                cmd.Parameters.AddWithValue("@Time", Time);
+                cmd.AddParameterWithValue("@ID", id);
+                cmd.AddParameterWithValue("@Name", Name);
+                cmd.AddParameterWithValue("@Note", Note);
+                cmd.AddParameterWithValue("@Time", Time);
+                cmd.AddParameterWithValue("@journalid", Journalid);
+                cmd.AddParameterWithValue("@EdsmId", EdsmId);
 
-                SQLiteDBClass.SqlNonQueryText(cn, cmd);
-                SQLiteDBClass.globalSystemNotes[Name.ToLower()] = this;
+                SQLiteDBClass.SQLNonQueryText(cn, cmd);
+            }
 
-                return true;
+            GetAllSystemNotes();
+
+            return true;
+        }
+
+        public static List<SystemNoteClass> globalSystemNotes = new List<SystemNoteClass>();
+
+        public static bool GetAllSystemNotes()
+        {
+            try
+            {
+                using (SQLiteConnectionUser cn = new SQLiteConnectionUser(mode: EDDbAccessMode.Reader))
+                {
+                    using (DbCommand cmd = cn.CreateCommand("select * from SystemNote"))
+                    {
+                        DataSet ds = SQLiteDBClass.SQLQueryText(cn, cmd);
+                        if (ds.Tables.Count == 0 || ds.Tables[0].Rows.Count == 0)
+                        {
+                            return false;
+                        }
+
+                        globalSystemNotes.Clear();
+
+                        foreach (DataRow dr in ds.Tables[0].Rows)
+                        {
+                            SystemNoteClass sys = new SystemNoteClass(dr);
+                            globalSystemNotes.Add(sys);
+                        }
+
+                        return true;
+
+                    }
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
+
+        public static SystemNoteClass GetNoteOnSystem(string name, long edsmid = -1)      // case insensitive.. null if not there
+        {
+            return globalSystemNotes.FindLast(x => x.Name.Equals(name, StringComparison.InvariantCultureIgnoreCase) && (edsmid <= 0 || x.EdsmId <= 0 || x.EdsmId == edsmid) );
+        }
+
+        public static SystemNoteClass GetNoteOnJournalEntry(long jid)
+        {
+            if (jid > 0)
+                return globalSystemNotes.FindLast(x => x.Journalid == jid);
+            else
+                return null;
+        }
+
 
     }
 }

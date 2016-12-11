@@ -1,675 +1,1218 @@
 ﻿using EDDiscovery.DB;
 using EDDiscovery2;
 using EDDiscovery2.DB;
-using EDDiscovery2.EDDB;
 using EDDiscovery2.EDSM;
-using EMK.Cartography;
-using Newtonsoft.Json;
+using EDDiscovery2.Forms;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
+using System.Data.Common;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
-using System.Runtime.Serialization.Formatters.Binary;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
+using System.Configuration;
+using EDDiscovery.EDSM;
+using System.Threading.Tasks;
+using System.Text;
+using System.ComponentModel;
+using System.Text.RegularExpressions;
+using EDDiscovery.HTTP;
+using EDDiscovery.Forms;
+using EDDiscovery.EliteDangerous;
+using EDDiscovery.EliteDangerous.JournalEvents;
+using EDDiscovery.EDDN;
 
 namespace EDDiscovery
 {
+
     public delegate void DistancesLoaded();
 
     public partial class EDDiscoveryForm : Form
     {
-        public readonly AutoCompleteStringCollection SystemNames = new AutoCompleteStringCollection();
-        public string CommanderName;
+        #region Variables
 
-        readonly string fileTgcSystems ;
-        readonly string fileEDSMDistances;
+        public const int WM_MOVE = 3;
+        public const int WM_SIZE = 5;
+        public const int WM_MOUSEMOVE = 0x200;
+        public const int WM_LBUTTONDOWN = 0x201;
+        public const int WM_LBUTTONUP = 0x202;
+        public const int WM_NCLBUTTONDOWN = 0xA1;
+        public const int WM_NCLBUTTONUP = 0xA2;
+        public const int WM_NCMOUSEMOVE = 0xA0;
+        public const int HT_CLIENT = 0x1;
+        public const int HT_CAPTION = 0x2;
+        public const int HT_LEFT = 0xA;
+        public const int HT_RIGHT = 0xB;
+        public const int HT_BOTTOM = 0xF;
+        public const int HT_BOTTOMRIGHT = 0x11;
+        public const int WM_NCL_RESIZE = 0x112;
+        public const int HT_RESIZE = 61448;
+        public const int WM_NCHITTEST = 0x84;
 
-        public event DistancesLoaded OnDistancesLoaded;
-        public EDSMSync edsmsync;
+        // Mono compatibility
+        private bool _window_dragging = false;
+        private Point _window_dragMousePos = Point.Empty;
+        private Point _window_dragWindowPos = Point.Empty;
+        public EDDTheme theme;
 
-        public EDDConfig eddConfig;
+        public string CommanderName { get; private set; }
+        public int DisplayedCommander = 0;
+
+        public HistoryList history = new HistoryList();
+
+        static public EDDConfig EDDConfig { get; private set; }
+
+        public TravelHistoryControl TravelControl { get { return travelHistoryControl1; } }
+        public RouteControl RouteControl { get { return routeControl1; } }
+        public ExportControl ExportControl { get { return exportControl1; } }
+        public EDDiscovery2.ImageHandler.ImageHandler ImageHandler { get { return imageHandler1; } }
+
+        public bool option_nowindowreposition { get; set; } = false;                             // Cmd line options
+        public bool option_debugoptions { get; set; } = false;
+
+        public EDDiscovery2._3DMap.MapManager Map { get; private set; }
+
+        public event EventHandler HistoryRefreshed; // this is an internal hook
+
+
+        public delegate void HistoryChange(HistoryList l);          // subscribe to get events
+        public event HistoryChange OnHistoryChange;
+        public delegate void NewEntry(HistoryEntry l, HistoryList hl);
+        public event NewEntry OnNewEntry;
+        public delegate void NewLogEntry(string txt, Color c);
+        public event NewLogEntry OnNewLogEntry;
+
+        static public GalacticMapping galacticMapping;
+
+        public CancellationTokenSource CancellationTokenSource { get; private set; } = new CancellationTokenSource();
+
+        private ManualResetEvent _syncWorkerCompletedEvent = new ManualResetEvent(false);
+        private ManualResetEvent _checkSystemsWorkerCompletedEvent = new ManualResetEvent(false);
+
+        public EDSMSync EdsmSync;
+
+        Action cancelDownloadMaps = null;
+        Task<bool> downloadMapsTask = null;
+        Task checkInstallerTask = null;
+        private string logname = "";
+        private bool themeok = true;
+        private Forms.SplashForm splashform = null;
+        BackgroundWorker dbinitworker = null;
+
+        EliteDangerous.EDJournalClass journalmonitor;
+        GitHubRelease newRelease;
+
+        private bool CanSkipSlowUpdates()
+        {
+#if DEBUG
+            return EDDConfig.CanSkipSlowUpdates;
+#else
+            return false;
+#endif
+        }
+
+        #endregion
+
+        #region Initialisation
+
+        private class TraceLogWriter : TextWriter
+        {
+            public override Encoding Encoding { get { return Encoding.UTF8; } }
+            public override IFormatProvider FormatProvider { get { return CultureInfo.InvariantCulture; } }
+            public override void Write(string value) { Trace.Write(value); }
+            public override void WriteLine(string value) { Trace.WriteLine(value); }
+            public override void WriteLine() { Trace.WriteLine(""); }
+        }
 
         public EDDiscoveryForm()
         {
             InitializeComponent();
 
-            eddConfig = new EDDConfig();
+            label_version.Text = "Version " + Assembly.GetExecutingAssembly().FullName.Split(',')[1].Split('=')[1];
 
-            fileTgcSystems = Path.Combine(Tools.GetAppDataDirectory(), "tgcsystems.json");
-            fileEDSMDistances = Path.Combine(Tools.GetAppDataDirectory(), "EDSMDistances.json");
+            ProcessCommandLineOptions();
 
-            edsmsync = new EDSMSync(this);
+            string logpath = "";
+            try
+            {
+                logpath = Path.Combine(Tools.GetAppDataDirectory(), "Log");
+                if (!Directory.Exists(logpath))
+                {
+                    Directory.CreateDirectory(logpath);
+                }
+
+                if (!Debugger.IsAttached)
+                {
+                    logname = Path.Combine(Tools.GetAppDataDirectory(), "Log", $"Trace_{DateTime.Now.ToString("yyyyMMddHHmmss")}.log");
+
+                    System.Diagnostics.Trace.AutoFlush = true;
+                    // Log trace events to the above file
+                    System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(logname));
+                    // Log unhandled exceptions
+                    AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+                    // Log unhandled UI exceptions
+                    Application.ThreadException += Application_ThreadException;
+                    // Redirect console to trace
+                    Console.SetOut(new TraceLogWriter());
+                    // Log first-chance exceptions to help diagnose errors
+                    Register_FirstChanceException_Handler();
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"Unable to create the folder '{logpath}'");
+                Trace.WriteLine($"Exception: {ex.Message}");
+            }
+
+            SQLiteConnectionUser.EarlyReadRegister();
+            EDDConfig.Instance.Update(write: false);
+
+            dbinitworker = new BackgroundWorker();
+            dbinitworker.DoWork += Dbinitworker_DoWork;
+            dbinitworker.RunWorkerCompleted += Dbinitworker_RunWorkerCompleted;
+            dbinitworker.RunWorkerAsync();
+
+            theme = new EDDTheme();
+
+            EDDConfig = EDDConfig.Instance;
+            galacticMapping = new GalacticMapping();
+
+            ToolStripManager.Renderer = theme.toolstripRenderer;
+            theme.LoadThemes();                                         // default themes and ones on disk loaded
+            themeok = theme.RestoreSettings();                                    // theme, remember your saved settings
 
             trilaterationControl.InitControl(this);
             travelHistoryControl1.InitControl(this);
             imageHandler1.InitControl(this);
+            settings.InitControl(this);
+            journalViewControl1.InitControl(this,0);
+            routeControl1.InitControl(this);
+            savedRouteExpeditionControl1.InitControl(this);
+            exportControl1.InitControl(this);
+
+
+            EdsmSync = new EDSMSync(this);
+
+            Map = new EDDiscovery2._3DMap.MapManager(option_nowindowreposition, travelHistoryControl1);
+
+            journalmonitor = new EliteDangerous.EDJournalClass();
+
+            this.TopMost = EDDConfig.KeepOnTop;
+
+            ApplyTheme();
+
+            DisplayedCommander = EDDiscoveryForm.EDDConfig.CurrentCommander.Nr;
         }
 
-        public TravelHistoryControl TravelControl
+        private void Dbinitworker_DoWork(object sender, DoWorkEventArgs e)
         {
-            get { return travelHistoryControl1; }
+            Trace.WriteLine("Initializing database");
+            SQLiteConnectionOld.Initialize();
+            SQLiteConnectionUser.Initialize();
+            SQLiteConnectionSystem.Initialize();
+            Trace.WriteLine("Database initialization complete");
         }
 
-
-        internal void ShowTrilaterationTab()
+        private void Dbinitworker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
-            tabControl1.SelectedIndex = 1;
+            if (splashform != null)
+            {
+                splashform.Close();
+            }
         }
 
-        internal void ShowHistoryTab()
-        {
-            tabControl1.SelectedIndex = 0;
-        }
-
-        private void Form1_Load(object sender, EventArgs e)
+        // We can't prevent an unhandled exception from killing the application.
+        // See https://blog.codinghorror.com/improved-unhandled-exception-behavior-in-net-20/
+        // Log the exception info if we can, and ask the user to report it.
+        [System.Runtime.ExceptionServices.HandleProcessCorruptedStateExceptions]
+        [System.Security.SecurityCritical]
+        [System.Runtime.ConstrainedExecution.ReliabilityContract(
+            System.Runtime.ConstrainedExecution.Consistency.WillNotCorruptState,
+            System.Runtime.ConstrainedExecution.Cer.Success)]
+        private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
             try
             {
-                // Click once   System.Deployment.Application.ApplicationDeployment.CurrentDeployment.CurrentVe‌​rsion
-                var assemblyFullName = Assembly.GetExecutingAssembly().FullName;
-                var version = assemblyFullName.Split(',')[1].Split('=')[1];
-                Text = string.Format("EDDiscovery v{0}", version);
-                EliteDangerous.CheckED();
-                SQLiteDBClass db = new SQLiteDBClass();
-                eddConfig.Update();
-
-                var top = db.GetSettingInt("FormTop", -1);
-                if (top > 0)
-                {
-                    var left = db.GetSettingInt("FormLeft", -1);
-                    var height = db.GetSettingInt("FormHeight", -1);
-                    var width = db.GetSettingInt("FormWidth", -1);
-                    this.Top = top;
-                    this.Left = left;
-                    this.Height = height;
-                    this.Width = width;
-                }
-
-                labelPanelText.Text = "Loading. Please wait!";
-                panelInfo.Visible = true;
-                panelInfo.BackColor = Color.Gold;
-
-                SystemData sdata = new SystemData();
-                routeControl1.travelhistorycontrol1 = travelHistoryControl1;
-
-                // Default directory
-                string datapath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Frontier_Developments\\Products"); // \\FORC-FDEV-D-1001\\Logs\\";
-
-                bool auto = db.GetSettingBool("NetlogDirAutoMode", true);
-                if (auto)
-                {
-                    datapath = db.GetSettingString("Netlogdir", datapath);
-                    textBoxNetLogDir.Text = datapath;
-                    radioButton_Auto.Checked = true;
-                }
-                else
-                {
-                    radioButton_Manual.Checked = true;
-                    textBoxNetLogDir.Text = datapath = db.GetSettingString("Netlogdir", datapath); ;
-                }
-
-
-                textBoxEDSMApiKey.Text = db.GetSettingString("EDSMApiKey", "");
-                checkBox_Distances.Checked = eddConfig.UseDistances;
-
-                if (EliteDangerous.EDRunning)
-                {
-                    TravelHistoryControl.LogText("EliteDangerous " + EliteDangerous.EDVersion + " is running." + Environment.NewLine);
-                }
-                else
-                    TravelHistoryControl.LogText("EliteDangerous is not running ." + Environment.NewLine);
-
-                if (!EliteDangerous.CheckStationLogging())
-                {
-                    TravelHistoryControl.LogText("Elite Dangerous is not logging system names!!! ", Color.Red);
-                    TravelHistoryControl.LogText("Add ");
-                    TravelHistoryControl.LogText("VerboseLogging=\"1\" ", Color.Blue);
-                    TravelHistoryControl.LogText("to <Network  section in File: " + Path.Combine(EliteDangerous.EDDirectory, "AppConfig.xml") + " or AppConfigLocal.xml  Remeber to restart Elite!" + Environment.NewLine);
-
-                    labelPanelText.Text = "Elite Dangerous is not logging system names!";
-                    panelInfo.BackColor = Color.Salmon;
-                }
-
-
-                if (File.Exists("test.txt"))
-                    button1.Visible = true;
-
-
+                System.Diagnostics.Trace.WriteLine($"\n==== UNHANDLED EXCEPTION ====\n{e.ExceptionObject.ToString()}\n==== cut ====");
+                MessageBox.Show($"There was an unhandled exception.\nPlease report this at https://github.com/EDDiscovery/EDDiscovery/issues and attach {logname}\nException: {e.ExceptionObject.ToString()}\n\nThis application must now close", "Unhandled Exception");
             }
-            catch (Exception ex)
+            catch
             {
-                System.Windows.Forms.MessageBox.Show("Form1_Load exception: " + ex.Message);
-                System.Windows.Forms.MessageBox.Show("Trace: " + ex.StackTrace);
+            }
+
+            Environment.Exit(1);
+        }
+
+        // Handling a ThreadException leaves the application in an undefined state.
+        // See https://msdn.microsoft.com/en-us/library/system.windows.forms.application.threadexception(v=vs.100).aspx
+        // Log the exception, ask the user to report it, and exit.
+        private void Application_ThreadException(object sender, ThreadExceptionEventArgs e)
+        {
+            try
+            {
+                System.Diagnostics.Trace.WriteLine($"\n==== UNHANDLED EXCEPTION ON {Thread.CurrentThread.Name} THREAD ====\n{e.Exception.ToString()}\n==== cut ====");
+                MessageBox.Show($"There was an unhandled exception.\nPlease report this at https://github.com/EDDiscovery/EDDiscovery/issues and attach {logname}\nException: {e.Exception.Message}\n{e.Exception.StackTrace}\n\nThis application must now close", "Unhandled Exception");
+            }
+            catch
+            {
+            }
+
+            Environment.Exit(1);
+        }
+
+        // Mono does not implement AppDomain.CurrentDomain.FirstChanceException
+        private static void Register_FirstChanceException_Handler()
+        {
+            try
+            {
+                Type adtype = AppDomain.CurrentDomain.GetType();
+                EventInfo fcexevent = adtype.GetEvent("FirstChanceException");
+                if (fcexevent != null)
+                {
+                    fcexevent.AddEventHandler(AppDomain.CurrentDomain, new EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs>(CurrentDomain_FirstChanceException));
+                }
+            }
+            catch
+            {
             }
         }
 
+        // Log exceptions were they occur so we can try to  some
+        // hard to debug issues.
+        private static void CurrentDomain_FirstChanceException(object sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
+        {
+            // Ignore HTTP NotModified exceptions
+            if (e.Exception is System.Net.WebException)
+            {
+                var webex = (WebException)e.Exception;
+                if (webex.Response != null && webex.Response is HttpWebResponse)
+                {
+                    var resp = (HttpWebResponse)webex.Response;
+                    if (resp.StatusCode == HttpStatusCode.NotModified)
+                    {
+                        return;
+                    }
+                }
+            }
+            // Ignore DLL Not Found exceptions from OpenTK
+            else if (e.Exception is DllNotFoundException && e.Exception.Source == "OpenTK")
+            {
+                return;
+            }
 
+            var trace = new StackTrace(1, true);
+
+            // Ignore first-chance exceptions in threads outside our code
+            bool ourcode = false;
+            foreach (var frame in trace.GetFrames())
+            {
+                if (frame.GetMethod().DeclaringType.Assembly == Assembly.GetExecutingAssembly())
+                {
+                    ourcode = true;
+                    break;
+                }
+            }
+
+            if (ourcode)
+                System.Diagnostics.Trace.WriteLine($"First chance exception: {e.Exception.Message}\n{trace.ToString()}");
+        }
+
+        private void EDDiscoveryForm_Layout(object sender, LayoutEventArgs e)       // Manually position, could not get gripper under tab control with it sizing for the life of me
+        {
+        }
+
+        private void ProcessCommandLineOptions()
+        {
+            List<string> parts = Environment.GetCommandLineArgs().ToList();
+
+            option_nowindowreposition = parts.FindIndex(x => x.Equals("-NoRepositionWindow", StringComparison.InvariantCultureIgnoreCase)) != -1 ||
+                parts.FindIndex(x => x.Equals("-NRW", StringComparison.InvariantCultureIgnoreCase)) != -1;
+
+            int ai = parts.FindIndex(x => x.Equals("-Appfolder", StringComparison.InvariantCultureIgnoreCase));
+            if ( ai != -1 && ai < parts.Count - 1)
+            {
+                Tools.appfolder = parts[ai + 1];
+                label_version.Text += " (Using " + Tools.appfolder + ")";
+            }
+
+            option_debugoptions = parts.FindIndex(x => x.Equals("-Debug", StringComparison.InvariantCultureIgnoreCase)) != -1;
+
+            if (parts.FindIndex(x => x.Equals("-EDSMBeta", StringComparison.InvariantCultureIgnoreCase)) != -1)
+            {
+                EDSMClass.ServerAddress = "http://beta.edsm.net:8080/";
+                label_version.Text += " (EDSMBeta)";
+            }
+
+            if (parts.FindIndex(x => x.Equals("-EDSMNull", StringComparison.InvariantCultureIgnoreCase)) != -1)
+            {
+                EDSMClass.ServerAddress = "";
+                label_version.Text += " (EDSM No server)";
+            }
+
+            if (parts.FindIndex(x => x.Equals("-DISABLEBETACHECK", StringComparison.InvariantCultureIgnoreCase)) != -1)
+            {
+                EliteDangerous.EDJournalReader.disable_beta_commander_check = true;
+                label_version.Text += " (no BETA detect)";
+            }
+
+            int jr = parts.FindIndex(x => x.Equals("-READJOURNAL", StringComparison.InvariantCultureIgnoreCase));   // use this so much to check journal decoding
+            if (jr != -1)
+            {
+                string file = parts[jr + 1];
+                System.IO.StreamReader filejr = new System.IO.StreamReader(file);
+                string line;
+                string system = "";
+                StarScan ss = new StarScan();
+
+                while ((line = filejr.ReadLine()) != null)
+                {
+                    if (line.Equals("END"))
+                        break;
+                    //System.Diagnostics.Trace.WriteLine(line);
+                    if (line.Length > 0)
+                    {
+                        JObject jo = (JObject)JObject.Parse(line);
+                        JSONPrettyPrint jpp = new JSONPrettyPrint(EliteDangerous.JournalEntry.StandardConverters(), "event;timestamp", "_Localised", (string)jo["event"]);
+                        string s = jpp.PrettyPrint(line, 80);
+                        //System.Diagnostics.Trace.WriteLine(s);
+
+                        EliteDangerous.JournalEntry je = EliteDangerous.JournalEntry.CreateJournalEntry(line);
+                        //System.Diagnostics.Trace.WriteLine(je.EventTypeStr);
+
+                        if (je.EventTypeID == JournalTypeEnum.Location)
+                        {
+                            EDDiscovery.EliteDangerous.JournalEvents.JournalLocOrJump jl = je as EDDiscovery.EliteDangerous.JournalEvents.JournalLocOrJump;
+                            system = jl.StarSystem;
+                        }
+                        else if (je.EventTypeID == JournalTypeEnum.FSDJump)
+                        {
+                            EDDiscovery.EliteDangerous.JournalEvents.JournalFSDJump jfsd = je as EDDiscovery.EliteDangerous.JournalEvents.JournalFSDJump;
+                            system = jfsd.StarSystem;
+
+                        }
+                        else if (je.EventTypeID == JournalTypeEnum.Scan)
+                        {
+                            ss.Process(je as JournalScan, new SystemClass(system));
+                        }
+                    }
+                }
+            }
+        }
+
+        private void EDDiscoveryForm_Load(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!(SQLiteConnectionUser.IsInitialized && SQLiteConnectionSystem.IsInitialized))
+                {
+                    splashform = new SplashForm();
+                    splashform.ShowDialog(this);
+                }
+
+                EliteDangerousClass.CheckED();
+                EDDConfig.Update();
+                RepositionForm();
+                InitFormControls();
+                settings.InitSettingsTab();
+                savedRouteExpeditionControl1.LoadControl();
+                travelHistoryControl1.LoadControl();
+
+                CheckIfEliteDangerousIsRunning();
+
+                if (option_debugoptions)
+                {
+                    button_test.Visible = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.Forms.MessageBox.Show("EDDiscoveryForm_Load exception: " + ex.Message + "\n" + "Trace: " + ex.StackTrace);
+            }
+        }
 
         private void EDDiscoveryForm_Shown(object sender, EventArgs e)
         {
-            try
+            _checkSystemsWorker.RunWorkerAsync();
+            downloadMapsTask = DownloadMaps((cb) => cancelDownloadMaps = cb);
+
+            if (!themeok)
             {
-                travelHistoryControl1.Enabled = false;
-
-                var redWizzardThread = new Thread(GetRedWizzardFiles) {Name = "Downloading Red Wizzard Files"};
-                var edsmThread = new Thread(GetEDSMSystems) {Name = "Downloading EDSM Systems"};
-                var downloadmapsThread = new Thread(DownloadMaps) { Name = "Downloading map Files" };
-                redWizzardThread.Start();
-                edsmThread.Start();
-                downloadmapsThread.Start();
-
-                while (redWizzardThread.IsAlive || edsmThread.IsAlive || downloadmapsThread.IsAlive)
-                {
-                    Thread.Sleep(50);
-                    Application.DoEvents();
-                }
-
-                redWizzardThread.Join();
-                edsmThread.Join();
-                downloadmapsThread.Join();
-
-                OnDistancesLoaded += new DistancesLoaded(this.DistancesLoaded);
-
-                 GetEDSMDistancesAsync();
-
-                //Application.DoEvents();
-                GetEDDBAsync();
-
-
-                if (SystemData.SystemList.Count == 0)
-                {
-                    //sdata.ReadData();
-                }
-
-
-
-                routeControl1.textBox_From.AutoCompleteCustomSource = SystemNames;
-                routeControl1.textBox_To.AutoCompleteCustomSource = SystemNames;
-
-                Text += "         Systems:  " + SystemData.SystemList.Count;
-
-                routeControl1.travelhistorycontrol1 = travelHistoryControl1;
-                travelHistoryControl1.netlog.OnNewPosition += new NetLogEventHandler(routeControl1.NewPosition);
-                travelHistoryControl1.netlog.OnNewPosition += new NetLogEventHandler(travelHistoryControl1.NewPosition);
-                travelHistoryControl1.sync.OnNewEDSMTravelLog += new EDSMNewSystemEventHandler(travelHistoryControl1.RefreshEDSMEvent);
-
-                TravelHistoryControl.LogText("Reading travelhistory ");
-                travelHistoryControl1.RefreshHistory();
-                travelHistoryControl1.netlog.StartMonitor();
-
-                travelHistoryControl1.Enabled = true;
-                if (EliteDangerous.CheckStationLogging())
-                {
-                    panelInfo.Visible = false;
-                }
-
-
-                // Check for a new installer    
-                CheckForNewInstaller();
-
-            }
-            catch (Exception ex)
-            {
-                System.Windows.Forms.MessageBox.Show("Form1_Load exception: " + ex.Message);
-                System.Windows.Forms.MessageBox.Show("Trace: " + ex.StackTrace);
-                travelHistoryControl1.Enabled = true;
-
+                LogLineHighlight("The theme stored has missing colors or other missing information");
+                LogLineHighlight("Correct the missing colors or other information manually using the Theme Editor in Settings");
             }
         }
 
-
-        public void DownloadMaps()
+        private Task CheckForNewInstallerAsync()
         {
+            return Task.Factory.StartNew(() =>
+            {
+                CheckForNewinstaller();
+            });
+        }
+
+        private bool CheckForNewinstaller()
+        {
+                try
+                {
+
+                    GitHubClass github = new GitHubClass();
+
+                    GitHubRelease rel = github.GetLatestRelease();
+
+                    if (rel != null)
+                    {
+                        //string newInstaller = jo["Filename"].Value<string>();
+
+                        var currentVersion = Application.ProductVersion;
+
+                        Version v1, v2;
+                        v1 = new Version(rel.ReleaseVersion);
+                        v2 = new Version(currentVersion);
+
+                        if (v1.CompareTo(v2) > 0) // Test if newer installer exists:
+                        {
+                            newRelease = rel;
+                            this.BeginInvoke(new Action(() => LogLineHighlight("New EDDiscovery installer available: " + rel.ReleaseName)));
+                            this.BeginInvoke(new Action(() => PanelInfoNewRelease()));
+                        return true;
+                        }
+                    }
+                }
+                catch (Exception )
+                {
+
+                }
+
+            return false;
+        }
+
+        private void PanelInfoNewRelease()
+        {
+            panelInfo.BackColor = Color.Green;
+            labelPanelText.Text = "Download new release!";
+            panelInfo.Visible = true;
+        }
+
+
+        private void InitFormControls()
+        {
+            labelPanelText.Text = "Loading. Please wait!";
+            panelInfo.Visible = true;
+            panelInfo.BackColor = Color.Gold;
+
+            routeControl1.travelhistorycontrol1 = travelHistoryControl1;
+        }
+
+        private void RepositionForm()
+        {
+            var top = SQLiteDBClass.GetSettingInt("FormTop", -1);
+            if (top >= 0 && option_nowindowreposition == false)
+            {
+                var left = SQLiteDBClass.GetSettingInt("FormLeft", 0);
+                var height = SQLiteDBClass.GetSettingInt("FormHeight", 800);
+                var width = SQLiteDBClass.GetSettingInt("FormWidth", 800);
+
+                // Adjust so window fits on screen; just in case user unplugged a monitor or something
+
+                var screen = SystemInformation.VirtualScreen;
+                if (height > screen.Height) height = screen.Height;
+                if (top + height > screen.Height + screen.Top) top = screen.Height + screen.Top - height;
+                if (width > screen.Width) width = screen.Width;
+                if (left + width > screen.Width + screen.Left) left = screen.Width + screen.Left - width;
+                if (top < screen.Top) top = screen.Top;
+                if (left < screen.Left) left = screen.Left;
+
+                this.Top = top;
+                this.Left = left;
+                this.Height = height;
+                this.Width = width;
+
+                this.CreateParams.X = this.Left;
+                this.CreateParams.Y = this.Top;
+                this.StartPosition = FormStartPosition.Manual;
+
+            }
+
+            travelHistoryControl1.LoadLayoutSettings();
+            journalViewControl1.LoadLayoutSettings();
+        }
+
+        private void CheckIfEliteDangerousIsRunning()
+        {
+            if (EliteDangerousClass.EDRunning)
+            {
+                LogLine("EliteDangerous is running.");
+            }
+            else
+            {
+                LogLine("EliteDangerous is not running.");
+            }
+        }
+
+        private void EDDiscoveryForm_Activated(object sender, EventArgs e)
+        {
+        }
+
+        public void ApplyTheme()
+        {
+            ToolStripManager.Renderer = theme.toolstripRenderer;
+            panel_close.Visible = !theme.WindowsFrame;
+            panel_minimize.Visible = !theme.WindowsFrame;
+            label_version.Visible = !theme.WindowsFrame;
+
+            this.Text = "EDDiscovery " + label_version.Text;            // note in no border mode, this is not visible on the title bar but it is in the taskbar..
+
+            theme.ApplyToForm(this);
+
+            if (OnHistoryChange!=null)
+                OnHistoryChange(history);
+
+            TravelControl.RedrawSummary();
+        }
+
+#endregion
+
+#region Information Downloads
+
+        public Task<bool> DownloadMaps(Action<Action> registerCancelCallback)          // ASYNC process
+        {
+            if (CanSkipSlowUpdates())
+            {
+                LogLine("Skipping checking for new maps (DEBUG option).");
+                var tcs = new TaskCompletionSource<bool>();
+                tcs.SetResult(false);
+                return tcs.Task;
+            }
+
             try
             {
                 if (!Directory.Exists(Path.Combine(Tools.GetAppDataDirectory(), "Maps")))
                     Directory.CreateDirectory(Path.Combine(Tools.GetAppDataDirectory(), "Maps"));
 
+                LogLine("Checking for new EDDiscovery maps");
 
-                LogText("Checking for new EDDiscovery maps" + Environment.NewLine);
-
-                if (DownloadMapFile("SC-01.jpg"))  // If server down only try one.
+                DeleteMapFile("DW4.png");
+                DeleteMapFile("SC-00.jpg");
+                return DownloadMapFiles(new[]
                 {
-                    DownloadMapFile("SC-02.jpg");
-                    DownloadMapFile("SC-03.jpg");
-                    DownloadMapFile("SC-04.jpg");
-
-                    DownloadMapFile("SC-L4.jpg");
-                    DownloadMapFile("SC-U4.jpg");
-
-                    for (int ii = -10; ii <= 60; ii += 10)
-                    {
-                        DownloadMapFile("Map A+00" + ii.ToString("+00;-00") + ".png");
-                        DownloadMapFile("Map A+00" + ii.ToString("+00;-00") + ".json");
-                    }
-                }
+                    "SC-01.jpg",
+                    "SC-02.jpg",
+                    "SC-03.jpg",
+                    "SC-04.jpg",
+                    "SC-L4.jpg",
+                    "SC-U4.jpg",
+                    "SC-00.png",
+                    "SC-00.json",
+                    "Galaxy_L.jpg",
+                    "Galaxy_L.json",
+                    "Galaxy_L_Grid.jpg",
+                    "Galaxy_L_Grid.json",
+                    "DW1.jpg",
+                    "DW1.json",
+                    "DW2.jpg",
+                    "DW2.json",
+                    "DW3.jpg",
+                    "DW3.json",
+                    "DW4.jpg",
+                    "DW4.json",
+                    "Formidine.png",
+                    "Formidine.json",
+                    "Formidine trans.png",
+                    "Formidine trans.json"
+                },
+                (s) => LogLine("Map check complete."),
+                registerCancelCallback);
             }
             catch (Exception ex)
             {
-                LogText("Exception in DownloadImages:" + ex.Message + Environment.NewLine);
+                LogLineHighlight("DownloadImages exception: " + ex.Message);
+                var tcs = new TaskCompletionSource<bool>();
+                tcs.SetException(ex);
+                return tcs.Task;
+            }
+        }
+
+        private Task<bool> DownloadMapFiles(string[] files, Action<bool> callback, Action<Action> registerCancelCallback)
+        {
+            List<Task<bool>> tasks = new List<Task<bool>>();
+            List<Action> cancelCallbacks = new List<Action>();
+
+            foreach (string file in files)
+            {
+                var task = EDDiscovery2.HTTP.DownloadFileHandler.BeginDownloadFile(
+                    "http://eddiscovery.astronet.se/Maps/" + file,
+                    Path.Combine(Tools.GetAppDataDirectory(), "Maps", file),
+                    (n) =>
+                    {
+                        if (n) LogLine("Downloaded map: " + file);
+                    }, cb => cancelCallbacks.Add(cb));
+                tasks.Add(task);
             }
 
+            registerCancelCallback(() => { foreach (var cb in cancelCallbacks) cb(); });
+
+            return Task<bool>.Factory.ContinueWhenAll<bool>(tasks.ToArray(), (ta) =>
+            {
+                bool success = ta.All(t => t.IsCompleted && t.Result);
+                callback(success);
+                return success;
+            });
         }
 
         private bool DownloadMapFile(string file)
         {
-            EDDBClass eddb = new EDDBClass();
             bool newfile = false;
-            if (eddb.DownloadFile("http://eddiscovery.astronet.se/Maps/" + file, Path.Combine(Tools.GetAppDataDirectory(), "Maps\\" + file), out newfile))
+            if (EDDiscovery2.HTTP.DownloadFileHandler.DownloadFile("http://eddiscovery.astronet.se/Maps/" + file, Path.Combine(Tools.GetAppDataDirectory(), "Maps", file), out newfile))
             {
                 if (newfile)
-                    LogText("Downloaded map: " + file + Environment.NewLine);
+                    LogLine("Downloaded map: " + file);
                 return true;
-
             }
             else
                 return false;
         }
 
-        private void GetRedWizzardFiles()
+        private void DeleteMapFile(string file)
         {
-            WebClient web = new WebClient();
+            string filename = Path.Combine(Tools.GetAppDataDirectory(), "Maps", file);
 
             try
             {
-                LogText("Checking for new EDDiscovery data" + Environment.NewLine);
-
-                GetNewRedWizzardFile(fileTgcSystems, "http://robert.astronet.se/Elite/ed-systems/tgcsystems.json");
-                //GetNewRedWizzardFile(fileTgcDistances, "http://robert.astronet.se/Elite/ed-systems/tgcdistances.json");
-            }
-            catch (Exception ex)
-            {
-                LogText("GetRedWizzardFiles exception:" + ex.Message + Environment.NewLine);
-                return;
-            }
-        }
-        
-        private void GetNewRedWizzardFile(string filename, string url)
-        {
-            string etagFilename = filename + ".etag";
-
-            var request = (HttpWebRequest) HttpWebRequest.Create(url);
-            request.UserAgent = "EDDiscovery v" + Assembly.GetExecutingAssembly().FullName.Split(',')[1].Split('=')[1];
-            request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-
-            if (File.Exists(etagFilename))
-            {
-                var etag = File.ReadAllText(etagFilename);
-                if (etag != "")
-                {
-                   request.Headers[HttpRequestHeader.IfNoneMatch] = etag;
-                }
-            }
-
-            try {
-                var response = (HttpWebResponse) request.GetResponse();
-                
-                LogText("Downloading " + filename + "..." + Environment.NewLine);
-
-                File.WriteAllText(filename + ".etag.tmp", response.Headers[HttpResponseHeader.ETag]);
-                var destFileStream = File.Open(filename + ".tmp", FileMode.Create, FileAccess.Write);
-                response.GetResponseStream().CopyTo(destFileStream);
-                
-                destFileStream.Close();
-                response.Close();
-
                 if (File.Exists(filename))
                     File.Delete(filename);
-                if (File.Exists(etagFilename))
-                    File.Delete(etagFilename);
-
-                File.Move(filename + ".tmp", filename);
-                File.Move(etagFilename + ".tmp", etagFilename);
-            } catch (WebException e)
-            {
-                var code = ((HttpWebResponse) e.Response).StatusCode;
-                if (code == HttpStatusCode.NotModified)
-                {
-                    LogText(filename + " is up to date." + Environment.NewLine);
-                } else
-                {
-                    throw e;
-                }
-            }
-        }
-
-
-        private void GetEDSMSystems()
-        {
-            try
-            {
-                SQLiteDBClass db = new SQLiteDBClass();
-                EDSMClass edsm = new EDSMClass();
-
-
-                string json;
-
-                string rwsystime = db.GetSettingString("RWLastSystems", "2000-01-01 00:00:00"); // Latest time from RW file.
-                string rwsysfiletime = "";
-
-                CommanderName = db.GetSettingString("CommanderName", "");
-                Invoke((MethodInvoker) delegate {
-                    travelHistoryControl1.textBoxCmdrName.Text = CommanderName;
-                });
-
-
-                json = LoadJsonFile(fileTgcSystems);
-                List<SystemClass> systems = SystemClass.ParseEDSC(json, ref rwsysfiletime);
-
-
-                if (!rwsystime.Equals(rwsysfiletime))  // New distance file from Redwizzard
-                {
-                    SystemClass.Delete(SystemStatusEnum.EDSC); // Remove all EDSC systems.
-                    
-                    db.PutSettingString("RWLastSystems", rwsysfiletime);
-                    db.PutSettingString("EDSMLastSystems", rwsysfiletime);
-                    Invoke((MethodInvoker) delegate {
-                        TravelHistoryControl.LogText("Adding data from tgcsystems.json " + Environment.NewLine);
-                    });
-                    SystemClass.Store(systems);
-                    EDDBClass eddb = new EDDBClass();
-                    DBUpdateEDDB(eddb);
-                }
-
-                string retstr = edsm.GetNewSystems(db);
-                Invoke((MethodInvoker)delegate
-                {
-                    TravelHistoryControl.LogText(retstr);
-                });
-
-
-
-                db.GetAllSystemNotes();
-                db.GetAllSystems();
-
-
-
-                SystemNames.Clear();
-                foreach (SystemClass system in SystemData.SystemList)
-                {
-                    SystemNames.Add(system.name);
-                }
-
             }
             catch (Exception ex)
             {
-                Invoke((MethodInvoker) delegate {
-                    TravelHistoryControl.LogText("GetEDSMSystems exception:" + ex.Message + Environment.NewLine);
-                    TravelHistoryControl.LogText(ex.StackTrace + Environment.NewLine);
-                });
+                LogLine("Exception in DeleteMapFile:" + ex.Message);
             }
-
         }
 
-        private Thread ThreadEDSMDistances;
-        private void GetEDSMDistancesAsync()
-        {
-            ThreadEDSMDistances = new System.Threading.Thread(new System.Threading.ThreadStart(GetEDSMDistances));
-            ThreadEDSMDistances.Name = "Get Distances";
-            ThreadEDSMDistances.Start();
-        }
+#endregion
 
-        private Thread ThreadEDDB;
+#region Initial Check Systems
 
-        public List<SystemPosition> visitedSystems
-        {
-            get { return travelHistoryControl1.visitedSystems; }
-        }
+        bool performedsmsync = false;
+        bool performeddbsync = false;
 
-        private void GetEDDBAsync()
-        {
-            ThreadEDDB = new System.Threading.Thread(new System.Threading.ThreadStart(GetEDDBUpdate));
-            ThreadEDDB.Name = "Get EDDB Update";
-            ThreadEDDB.Start();
-        }
-
-   
-        private void GetEDSMDistances()
+        private void _checkSystemsWorker_DoWork(object sender, System.ComponentModel.DoWorkEventArgs e)
         {
             try
             {
-                SQLiteDBClass db = new SQLiteDBClass();
+                var worker = (System.ComponentModel.BackgroundWorker)sender;
 
-                if (eddConfig.UseDistances)
-                {
-                    EDSMClass edsm = new EDSMClass();
-                    EDDBClass eddb = new EDDBClass();
-                    string lstdist = db.GetSettingString("EDSCLastDist", "2010-01-01 00:00:00");
-                    string json;
+                CheckSystems(() => worker.CancellationPending, (p, s) => worker.ReportProgress(p, s));
 
-                    // Get distances
-                    lstdist = db.GetSettingString("EDSCLastDist", "2010-01-01 00:00:00");
-                    List<DistanceClass> dists = new List<DistanceClass>();
-
-                    if (lstdist.Equals("2010-01-01 00:00:00"))
-                    {
-                        LogText("Downloading mirrored EDSM distance data. (Might take some time)" + Environment.NewLine);
-                        eddb.GetEDSMDistances();
-                        json = LoadJsonFile(fileEDSMDistances);
-                        if (json != null)
-                        {
-                            LogText("Adding mirrored EDSM distance data." + Environment.NewLine);
-
-                            dists = new List<DistanceClass>();
-                            dists = DistanceClass.ParseEDSM(json, ref lstdist);
-                            LogText("Found " + dists.Count.ToString() + " distances." + Environment.NewLine);
-
-                            Application.DoEvents();
-                            DistanceClass.Store(dists);
-                            db.PutSettingString("EDSCLastDist", lstdist);
-                        }
-                    }
-
-
-                    LogText("Checking for new distances from EDSM. ");
-
-
-                    Application.DoEvents();
-                    json = edsm.RequestDistances(lstdist);
-
-                    dists = new List<DistanceClass>();
-                    dists = DistanceClass.ParseEDSM(json, ref lstdist);
-
-                    if (json == null)
-                        LogText("No response from server." + Environment.NewLine);
-
-                    else
-                        LogText("Found " + dists.Count.ToString() + " new distances." + Environment.NewLine);
-
-                    Application.DoEvents();
-                    DistanceClass.Store(dists);
-                    db.PutSettingString("EDSCLastDist", lstdist);
-                }
-                db.GetAllDistances(eddConfig.UseDistances);  // Load user added distances
-                OnDistancesLoaded();
-
+                if (worker.CancellationPending)
+                    e.Cancel = true;
             }
-            catch (Exception ex)
+            catch (Exception ex) { e.Result = ex; }       // any exceptions, ignore
+            finally
             {
-                LogText("GetEDSMDistances exception:" + ex.Message + Environment.NewLine);
-                LogText(ex.StackTrace + Environment.NewLine);
+                _checkSystemsWorkerCompletedEvent.Set();
             }
-
         }
 
-        private void CheckForNewInstaller()
+        private void CheckSystems(Func<bool> cancelRequested, Action<int, string> reportProgress)  // ASYNC process, done via start up, must not be too slow.
         {
+            reportProgress(-1, "");
+
+            CommanderName = EDDConfig.CurrentCommander.Name;
+
+            string rwsystime = SQLiteConnectionSystem.GetSettingString("EDSMLastSystems", "2000-01-01 00:00:00"); // Latest time from RW file.
+            DateTime edsmdate;
+
+            if (!DateTime.TryParse(rwsystime, CultureInfo.InvariantCulture, DateTimeStyles.None, out edsmdate))
             {
-                EDDiscoveryServer eds = new EDDiscoveryServer();
+                edsmdate = new DateTime(2000, 1, 1);
+            }
 
-                string inst = eds.GetLastestInstaller();
-                if (inst != null)
+            if (DateTime.Now.Subtract(edsmdate).TotalDays > 7)  // Over 7 days do a sync from EDSM
+            {
+                // Also update galactic mapping from EDSM 
+                LogLine("Get galactic mapping from EDSM.");
+                galacticMapping.DownloadFromEDSM();
+
+                // Skip EDSM full update if update has been performed in last 4 days
+                bool outoforder = SQLiteConnectionSystem.GetSettingBool("EDSMSystemsOutOfOrder", true);
+                DateTime lastmod = outoforder ? SystemClass.GetLastSystemModifiedTime() : SystemClass.GetLastSystemModifiedTimeFast();
+
+                if (DateTime.UtcNow.Subtract(lastmod).TotalDays > 4 ||
+                    DateTime.UtcNow.Subtract(edsmdate).TotalDays > 28)
                 {
-                    JObject jo = (JObject)JObject.Parse(inst);
+                    performedsmsync = true;
+                }
+                else
+                {
+                    SQLiteConnectionSystem.PutSettingString("EDSMLastSystems", DateTime.Now.ToString(CultureInfo.InvariantCulture));
+                }
+            }
 
-                    string newVersion = jo["Version"].Value<string>();
-                    string newInstaller = jo["Filename"].Value<string>();
+            if (!cancelRequested())
+            {
+                SQLiteConnectionUser.TranferVisitedSystemstoJournalTableIfRequired();
+                SQLiteConnectionSystem.CreateSystemsTableIndexes();
+                SystemNoteClass.GetAllSystemNotes();                                // fill up memory with notes, bookmarks, galactic mapping
+                BookmarkClass.GetAllBookmarks();
+                galacticMapping.ParseData();                            // at this point, EDSM data is loaded..
+                SystemClass.AddToAutoComplete(galacticMapping.GetGMONames());
+                EDDiscovery2.DB.MaterialCommodities.SetUpInitialTable();
 
-                    var currentVersion = Application.ProductVersion;
+                LogLine("Loaded Notes, Bookmarks and Galactic mapping.");
 
-                    Version v1, v2;
-                    v1 = new Version(newVersion);
-                    v2 = new Version(currentVersion);
+                string timestr = SQLiteConnectionSystem.GetSettingString("EDDBSystemsTime", "0");
+                DateTime time = new DateTime(Convert.ToInt64(timestr), DateTimeKind.Utc);
+                if (DateTime.UtcNow.Subtract(time).TotalDays > 6.5)     // Get EDDB data once every week.
+                    performeddbsync = true;
+            }
+        }
 
-                    if (v1.CompareTo(v2) > 0) // Test if newver installer exists:
+        private void _checkSystemsWorker_RunWorkerCompleted(object sender, System.ComponentModel.RunWorkerCompletedEventArgs e)
+        {
+            Exception ex = e.Cancelled ? null : (e.Error ?? e.Result as Exception);
+            ReportProgress(-1, "");
+            if (!e.Cancelled && !PendingClose)
+            {
+                if (ex != null)
+                {
+                    LogLineHighlight("Check Systems exception: " + ex.Message + Environment.NewLine + "Trace: " + ex.StackTrace);
+                }
+
+                imageHandler1.StartWatcher();
+                routeControl1.EnableRouteTab(); // now we have systems, we can update this..
+
+                routeControl1.travelhistorycontrol1 = travelHistoryControl1;
+                journalmonitor.OnNewJournalEntry += NewPosition;
+                EdsmSync.OnDownloadedSystems += RefreshDueToEDSMDownloadedSystems;
+
+
+                LogLine("Reading travel history");
+                HistoryRefreshed += _travelHistoryControl1_InitialRefreshDone;
+
+                RefreshHistoryAsync();
+
+                DeleteOldLogFiles();
+
+
+                panelInfo.Visible = false;
+
+                checkInstallerTask = CheckForNewInstallerAsync();
+
+                if (EDDN.EDDNClass.CheckforEDMC()) // EDMC is running
+                {
+                    if (EDDiscoveryForm.EDDConfig.CurrentCommander.SyncToEddn)  // Both EDD and EDMC should not sync to EDDN.
                     {
-                        LogText("New EDDiscovery installer availble  " + "http://eddiscovery.astronet.se/release/" + newInstaller + Environment.NewLine, Color.Salmon);
+                        LogLineHighlight("EDDiscovery and EDMarketConnector should not both sync to EDDN. Stop EDMC or uncheck 'send to EDDN' in settings tab!");
                     }
-
                 }
             }
         }
 
-
-        internal void DistancesLoaded()
+        private void RefreshDueToEDSMDownloadedSystems()
         {
             Invoke((MethodInvoker)delegate
             {
-                travelHistoryControl1.RefreshHistory();
+                RefreshHistoryAsync();
             });
         }
 
 
-        private void  GetEDDBUpdate()
+        private void _travelHistoryControl1_InitialRefreshDone(object sender, EventArgs e)
+        {
+            HistoryRefreshed -= _travelHistoryControl1_InitialRefreshDone;
+
+            if (!PendingClose)
+            {
+                AsyncPerformSync();                              // perform any async synchronisations
+
+                if (performeddbsync || performedsmsync)
+                {
+                    string databases = (performedsmsync && performeddbsync) ? "EDSM and EDDB" : ((performedsmsync) ? "EDSM" : "EDDB");
+
+                    LogLine("ED Discovery will now synchronise to the " + databases + " databases to obtain star information." + Environment.NewLine +
+                                    "This will take a while, up to 15 minutes, please be patient." + Environment.NewLine +
+                                    "Please continue running ED Discovery until refresh is complete.");
+                }
+            }
+        }
+
+
+        private void _checkSystemsWorker_ProgressChanged(object sender, System.ComponentModel.ProgressChangedEventArgs e)
+        {
+            ReportProgress(e.ProgressPercentage, (string)e.UserState);
+        }
+
+        #endregion
+
+        #region Async EDSM/EDDB Full Sync
+
+        private void AsyncPerformSync()
+        {
+            if (!_syncWorker.IsBusy)
+            {
+                edsmRefreshTimer.Enabled = false;
+                _syncWorker.RunWorkerAsync();
+            }
+        }
+
+        private void _syncWorker_DoWork(object sender, System.ComponentModel.DoWorkEventArgs e)
         {
             try
             {
-                EDDBClass eddb = new EDDBClass();
-                string timestr;
-                DateTime time;
+                var worker = (System.ComponentModel.BackgroundWorker)sender;
 
-                Thread.Sleep(1000);
+                PerformSync(() => worker.CancellationPending, (p, s) => worker.ReportProgress(p, s));
+                if (worker.CancellationPending)
+                    e.Cancel = true;
+            }
+            catch (Exception ex) { e.Result = ex; }       // ignore any excepctions
+            finally
+            {
+                _syncWorkerCompletedEvent.Set();
+            }
+        }
 
-                SQLiteDBClass db = new SQLiteDBClass();
-                timestr = db.GetSettingString("EDDBSystemsTime", "0");
-                time = new DateTime(Convert.ToInt64(timestr), DateTimeKind.Utc);
-                bool updatedb = false;
+        bool performhistoryrefresh = false;
+        bool syncwasfirstrun = false;
+        bool syncwaseddboredsm = false;
 
+        private void PerformSync(Func<bool> cancelRequested, Action<int, string> reportProgress)           // big check.. done in a thread.
+        {
+            reportProgress(-1, "");
 
+            performhistoryrefresh = false;
+            syncwasfirstrun = SystemClass.IsSystemsTableEmpty();                 // remember if DB is empty
 
+            // Force a full sync if newest data is more than 14 days old
 
-                if (DateTime.UtcNow.Subtract(time).TotalDays > 0.5)
+            bool outoforder = SQLiteConnectionSystem.GetSettingBool("EDSMSystemsOutOfOrder", true);
+            DateTime lastmod = outoforder ? SystemClass.GetLastSystemModifiedTime() : SystemClass.GetLastSystemModifiedTimeFast();
+            if (DateTime.UtcNow.Subtract(lastmod).TotalDays >= 14)
+            {
+                performedsmsync = true;
+            }
+
+            bool edsmoreddbsync = performedsmsync || performeddbsync;           // remember if we are syncing
+            syncwaseddboredsm = edsmoreddbsync;
+
+            if (performedsmsync || performeddbsync)
+            {
+                if (performedsmsync && !cancelRequested())
                 {
-                    LogText("Get systems from EDDB. ");
+                    // Download new systems
+                    performhistoryrefresh |= PerformEDSMFullSync(this, cancelRequested, reportProgress);
+                }
 
-                    if (eddb.GetSystems())
+                if (!cancelRequested())
+                {
+                    LogLine("Indexing systems table");
+                    SQLiteConnectionSystem.CreateSystemsTableIndexes();
+
+                    PerformEDDBFullSync(cancelRequested, reportProgress);
+                    performhistoryrefresh = true;
+                }
+            }
+
+            if (!cancelRequested())
+            {
+                LogLine("Indexing systems table");
+                SQLiteConnectionSystem.CreateSystemsTableIndexes();
+
+                if (CanSkipSlowUpdates())
+                {
+                    LogLine("Skipping loading updates (DEBUG option). Need to turn this back on again? Look in the Settings tab.");
+                }
+                else
+                {
+                    lastmod = outoforder ? SystemClass.GetLastSystemModifiedTime() : SystemClass.GetLastSystemModifiedTimeFast();
+                    if (DateTime.UtcNow.Subtract(lastmod).TotalHours >= 1)
                     {
-                        LogText("OK." + Environment.NewLine);
+                        LogLine("Checking for new EDSM systems (may take a few moments).");
+                        EDSMClass edsm = new EDSMClass();
+                        long updates = edsm.GetNewSystems(this, cancelRequested, reportProgress);
+                        LogLine("EDSM updated " + updates + " systems.");
+                        performhistoryrefresh |= (updates > 0);
+                    }
+                }
+            }
 
-                        db.PutSettingString("EDDBSystemsTime", DateTime.UtcNow.Ticks.ToString());
-                        updatedb = true;
+            reportProgress(-1, "");
+        }
+
+        private void _syncWorker_RunWorkerCompleted(object sender, System.ComponentModel.RunWorkerCompletedEventArgs e)
+        {
+            Exception ex = e.Cancelled ? null : (e.Error ?? e.Result as Exception);
+            ReportProgress(-1, "");
+
+            if (!e.Cancelled && !PendingClose)
+            {
+                if (ex != null)
+                {
+                    LogLineHighlight("Check Systems exception: " + ex.Message + Environment.NewLine + "Trace: " + ex.StackTrace);
+                }
+
+                long totalsystems = SystemClass.GetTotalSystems();
+                LogLineSuccess("Loading completed, total of " + totalsystems + " systems");
+
+                if (performhistoryrefresh)
+                {
+                    LogLine("Refresh due to updating systems");
+                    HistoryRefreshed += HistoryFinishedRefreshing;
+                    RefreshHistoryAsync();
+                }
+
+                edsmRefreshTimer.Enabled = true;
+            }
+        }
+
+        private void HistoryFinishedRefreshing(object sender, EventArgs e)
+        {
+            HistoryRefreshed -= HistoryFinishedRefreshing;
+            LogLine("Refreshing complete.");
+
+            if (syncwasfirstrun)
+            {
+                LogLine("EDSM and EDDB update complete. Please restart ED Discovery to complete the synchronisation ");
+            }
+            else if (syncwaseddboredsm)
+                LogLine("EDSM and/or EDDB update complete.");
+        }
+
+        private void _syncWorker_ProgressChanged(object sender, System.ComponentModel.ProgressChangedEventArgs e)
+        {
+            ReportProgress(e.ProgressPercentage, (string)e.UserState);
+        }
+
+#endregion
+
+#region EDSM and EDDB syncs code
+
+        private bool PerformEDSMFullSync(EDDiscoveryForm discoveryform, Func<bool> cancelRequested, Action<int, string> reportProgress)
+        {
+            string rwsystime = SQLiteConnectionSystem.GetSettingString("EDSMLastSystems", "2000-01-01 00:00:00"); // Latest time from RW file.
+            DateTime edsmdate;
+
+            if (!DateTime.TryParse(rwsystime, CultureInfo.InvariantCulture, DateTimeStyles.None, out edsmdate))
+            {
+                edsmdate = new DateTime(2000, 1, 1);
+            }
+
+            long updates = 0;
+
+            try
+            {
+                // Delete all old systems
+                SQLiteConnectionSystem.PutSettingString("EDSMLastSystems", "2010-01-01 00:00:00");
+                SQLiteConnectionSystem.PutSettingString("EDDBSystemsTime", "0");
+
+                EDSMClass edsm = new EDSMClass();
+
+                LogLine("Get hidden systems from EDSM and remove from database");
+
+                SystemClass.RemoveHiddenSystems();
+
+                if (cancelRequested())
+                    return false;
+
+                LogLine("Download systems file from EDSM.");
+
+                string edsmsystems = Path.Combine(Tools.GetAppDataDirectory(), "edsmsystems.json");
+
+                LogLine("Resyncing all downloaded EDSM systems with local database." + Environment.NewLine + "This will take a while.");
+
+                bool newfile;
+                bool success = EDDiscovery2.HTTP.DownloadFileHandler.DownloadFile(EDSMClass.ServerAddress + "dump/systemsWithCoordinates.json", edsmsystems, out newfile, (n, s) =>
+                {
+                    SQLiteConnectionSystem.CreateTempSystemsTable();
+
+                    string rwsysfiletime = "2014-01-01 00:00:00";
+                    bool outoforder = false;
+                    using (var reader = new StreamReader(s))
+                        updates = SystemClass.ParseEDSMUpdateSystemsStream(reader, ref rwsysfiletime, ref outoforder, true, discoveryform, cancelRequested, reportProgress, useCache: false, useTempSystems: true);
+                    if (!cancelRequested())       // abort, without saving time, to make it do it again
+                    {
+                        SQLiteConnectionSystem.PutSettingString("EDSMLastSystems", rwsysfiletime);
+                        LogLine("Replacing old systems table with new systems table and re-indexing - please wait");
+                        reportProgress(-1, "Replacing old systems table with new systems table and re-indexing - please wait");
+                        SQLiteConnectionSystem.ReplaceSystemsTable();
+                        SQLiteConnectionSystem.PutSettingBool("EDSMSystemsOutOfOrder", outoforder);
+                        reportProgress(-1, "");
                     }
                     else
-                        LogText("Failed." + Environment.NewLine, Color.Red);
-
-
-                    eddb.GetCommodities();
-                }
-
-
-                timestr = db.GetSettingString("EDDBStationsLiteTime", "0");
-                time = new DateTime(Convert.ToInt64(timestr), DateTimeKind.Utc);
-
-                if (DateTime.UtcNow.Subtract(time).TotalDays > 0.5)
-                {
-
-                    LogText("Get stations from EDDB. ");
-                    if (eddb.GetStationsLite())
                     {
-                        LogText("OK." + Environment.NewLine);
-                        db.PutSettingString("EDDBStationsLiteTime", DateTime.UtcNow.Ticks.ToString());
-                        updatedb = true;
+                        throw new OperationCanceledException();
                     }
-                    else
-                        LogText("Failed." + Environment.NewLine, Color.Red);
+                });
 
-                }
-
-
-                if (updatedb)
+                if (!success)
                 {
-                    DBUpdateEDDB(eddb);
+                    LogLine("Failed to download EDSM system file from server, will check next time");
+                    return false;
                 }
 
-                return;
+                // Stop if requested
+                if (cancelRequested())
+                    return false;
 
+                LogLine("Local database updated with EDSM data, " + updates + " systems updated.");
+
+                performedsmsync = false;
+                GC.Collect();
             }
             catch (Exception ex)
             {
-                Invoke((MethodInvoker)delegate
-                {
-                    TravelHistoryControl.LogText("GetEDSCSystems exception:" + ex.Message + Environment.NewLine);
-                });
+                LogLineHighlight("GetAllEDSMSystems exception:" + ex.Message);
             }
-           
+
+            return (updates > 0);
         }
 
-        private void DBUpdateEDDB(EDDBClass eddb)
+        private void edsmRefreshTimer_Tick(object sender, EventArgs e)
         {
-            List<SystemClass> eddbsystems = eddb.ReadSystems();
-            List<StationClass> eddbstations = eddb.ReadStations();
+            AsyncPerformSync();
+        }
 
-            LogText("Add new EDDB data to database." + Environment.NewLine);
-            eddb.Add2DB(eddbsystems, eddbstations);
+        private void PerformEDDBFullSync(Func<bool> cancelRequested, Action<int, string> reportProgress)
+        {
+            try
+            {
+                LogLine("Get systems from EDDB.");
+
+                string eddbdir = Path.Combine(Tools.GetAppDataDirectory(), "eddb");
+                if (!Directory.Exists(eddbdir))
+                    Directory.CreateDirectory(eddbdir);
+
+                string systemFileName = Path.Combine(eddbdir, "systems_populated.jsonl");
+
+                bool success = EDDiscovery2.HTTP.DownloadFileHandler.DownloadFile("http://robert.astronet.se/Elite/eddb/v5/systems_populated.jsonl", systemFileName);
+
+                if (success)
+                {
+                    if (cancelRequested())
+                        return;
+
+                    LogLine("Resyncing all downloaded EDDB data with local database." + Environment.NewLine + "This will take a while.");
+
+                    long number = SystemClass.ParseEDDBUpdateSystems(systemFileName, LogLineHighlight);
+
+                    LogLine("Local database updated with EDDB data, " + number + " systems updated");
+                    SQLiteConnectionSystem.PutSettingString("EDDBSystemsTime", DateTime.UtcNow.Ticks.ToString());
+                }
+                else
+                    LogLineHighlight("Failed to download EDDB Systems. Will try again next run.");
+
+                GC.Collect();
+                performeddbsync = false;
+            }
+            catch (Exception ex)
+            {
+                LogLineHighlight("GetEDDBUpdate exception: " + ex.Message);
+            }
         }
 
 
-        private void LogText(string text)
+        #endregion
+
+        #region Logging
+
+        private string logtext = "";     // to keep in case of no logs..
+
+        public string LogText { get { return logtext; } }
+
+        public void LogLine(string text)
+        {
+            LogLineColor(text, theme.TextBlockColor);
+        }
+
+        public void LogLineHighlight(string text)
+        {
+            LogLineColor(text, theme.TextBlockHighlightColor);
+        }
+
+        public void LogLineSuccess(string text)
+        {
+            LogLineColor(text, theme.TextBlockSuccessColor);
+        }
+
+        public void LogLineColor(string text, Color color)
         {
             try
             {
                 Invoke((MethodInvoker)delegate
-                           {
-                               TravelHistoryControl.LogText(text);
+                {
+                    logtext += text + Environment.NewLine;      // keep this, may be the only log showing
 
-                           });
+                    if (OnNewLogEntry != null)
+                        OnNewLogEntry(text + Environment.NewLine, color);
+                });
+            }
+            catch { }
+        }
+
+        public void ReportProgress(int percentComplete, string message)
+        {
+            if (!PendingClose)
+            {
+                if (percentComplete >= 0)
+                {
+                    this.toolStripProgressBar1.Visible = true;
+                    this.toolStripProgressBar1.Value = percentComplete;
+                }
+                else
+                {
+                    this.toolStripProgressBar1.Visible = false;
+                }
+
+                this.toolStripStatusLabel1.Text = message;
+            }
+        }
+
+        void DeleteOldLogFiles()
+        {
+            try
+            {
+                // Create a reference to the Log directory.
+                DirectoryInfo di = new DirectoryInfo(Path.Combine(Tools.GetAppDataDirectory(), "Log"));
+
+                Trace.WriteLine("Running logfile age check");
+                // Create an array representing the files in the current directory.
+                FileInfo[] fi = di.GetFiles("*.log");
+
+                System.Collections.IEnumerator myEnum = fi.GetEnumerator();
+
+                while (myEnum.MoveNext())
+                {
+                    FileInfo fiTemp = (FileInfo)(myEnum.Current);
+
+                    DateTime time = fiTemp.CreationTime;
+
+                    //Trace.WriteLine(String.Format("File {0}  time {1}", fiTemp.Name, __box(time)));
+
+                    TimeSpan maxage = new TimeSpan(30, 0, 0, 0);
+                    TimeSpan fileage = DateTime.Now - time;
+
+                    if (fileage > maxage)
+                    {
+                        Trace.WriteLine(String.Format("File {0} is older then maximum age. Removing file from Logs.", fiTemp.Name));
+                        fiTemp.Delete();
+                    }
+                }
             }
             catch
             {
             }
         }
 
-        public void LogText(string text, Color col)
-        {
-            try
-            {
-                Invoke((MethodInvoker)delegate
-                {
-                    TravelHistoryControl.LogText(text, col);
+#endregion
 
-                });
-            }
-            catch
-            {
-            }
-        }
-
-
-        public void LogLine(string text, Color col)
-        {
-            try
-            {
-                Invoke((MethodInvoker)delegate
-                {
-                    TravelHistoryControl.LogText(text + Environment.NewLine, col);
-
-                });
-            }
-            catch
-            {
-            }
-        }
-
+#region JSONandMisc
         static public string LoadJsonFile(string filename)
         {
             string json = null;
@@ -689,106 +1232,115 @@ namespace EDDiscovery
             return json;
         }
 
-
-      
-
-
-
-
-
-        private string LoadJSON(string jfile)
+        internal void ShowTrilaterationTab()
         {
-            string json = null;
-            try
-            {
-                string appdata = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\EDDiscovery";
-
-                if (!Directory.Exists(appdata))
-                    Directory.CreateDirectory(appdata);
-
-                string filename = appdata + "\\"+jfile;
-                
-                if (!File.Exists(filename))
-                    return null;
-
-
-                StreamReader reader = new StreamReader(filename);
-
-                json = reader.ReadToEnd();
-
-                reader.Close();
-            }
-            catch
-            {
-            }
-
-            return json;
+            tabControl1.SelectedIndex = 1;
         }
 
+#endregion
 
-
-
-        private void button_Browse_Click(object sender, EventArgs e)
-        {
-            FolderBrowserDialog dirdlg = new FolderBrowserDialog();
-
-
-            DialogResult dlgResult = dirdlg.ShowDialog();
-
-            if (dlgResult == DialogResult.OK)
-            {
-                textBoxNetLogDir.Text = dirdlg.SelectedPath;
-            }
-        }
-
-        private void button_Save_Click(object sender, EventArgs e)
-        {
-            SaveSettings();
-
-            tabControl1.SelectedTab = tabPageTravelHistory;
-            travelHistoryControl1.RefreshHistory();
-        }
+#region Closing
 
         private void SaveSettings()
         {
-            SQLiteDBClass db = new SQLiteDBClass();
+            settings.SaveSettings();
 
-            db.PutSettingBool("NetlogDirAutoMode", radioButton_Auto.Checked);
-            db.PutSettingString("Netlogdir", textBoxNetLogDir.Text);
-            db.PutSettingString("EDSMApiKey", textBoxEDSMApiKey.Text);
-            db.PutSettingInt("FormWidth", this.Width);
-            db.PutSettingInt("FormHeight", this.Height);
-            db.PutSettingInt("FormTop", this.Top);
-            db.PutSettingInt("FormLeft", this.Left);
-            eddConfig.UseDistances = checkBox_Distances.Checked;
-
-        }
-
-        private void routeControl1_Load(object sender, EventArgs e)
-        {
+            SQLiteDBClass.PutSettingInt("FormWidth", this.Width);
+            SQLiteDBClass.PutSettingInt("FormHeight", this.Height);
+            SQLiteDBClass.PutSettingInt("FormTop", this.Top);
+            SQLiteDBClass.PutSettingInt("FormLeft", this.Left);
+            routeControl1.SaveSettings();
+            theme.SaveSettings(null);
+            travelHistoryControl1.SaveSettings();
+            journalViewControl1.SaveSettings();
 
         }
+
+        Thread safeClose;
+        System.Windows.Forms.Timer closeTimer;
+
+        public bool PendingClose { get { return safeClose != null; } }           // we want to close boys!
 
         private void EDDiscoveryForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            travelHistoryControl1.netlog.StopMonitor();
-            edsmsync.StopSync();
-            SaveSettings();
+            if (safeClose == null)                  // so a close is a request now, and it launches a thread which cleans up the system..
+            {
+                e.Cancel = true;
+                edsmRefreshTimer.Enabled = false;
+                CancellationTokenSource.Cancel();
+                CancelHistoryRefresh();
+                _syncWorker.CancelAsync();
+                _checkSystemsWorker.CancelAsync();
+                if (cancelDownloadMaps != null)
+                {
+                    cancelDownloadMaps();
+                }
+                labelPanelText.Text = "Closing, please wait!";
+                panelInfo.Visible = true;
+                LogLineHighlight("Closing down, please wait..");
+                Console.WriteLine("Close.. safe close launched");
+                safeClose = new Thread(SafeClose) { Name = "Close Down", IsBackground = true };
+                safeClose.Start();
+            }
+            else if (safeClose.IsAlive)   // still working, cancel again..
+            {
+                e.Cancel = true;
+            }
+            else
+            {
+                Console.WriteLine("go for close");
+            }
         }
 
-        private void travelHistoryControl1_Load(object sender, EventArgs e)
+        private void SafeClose()        // ASYNC thread..
         {
+            Thread.Sleep(1000);
+            Console.WriteLine("Waiting for check systems to close");
+            if (_checkSystemsWorker.IsBusy)
+                _checkSystemsWorkerCompletedEvent.WaitOne();
 
+            Console.WriteLine("Waiting for full sync to close");
+            if (_syncWorker.IsBusy)
+                _syncWorkerCompletedEvent.WaitOne();
+
+            Console.WriteLine("Stopping discrete threads");
+            journalmonitor.StopMonitor();
+
+            if (EdsmSync != null)
+                EdsmSync.StopSync();
+
+            travelHistoryControl1.CloseClosestSystemThread();
+
+            Console.WriteLine("Go for close timer!");
+
+            Invoke((MethodInvoker)delegate          // we need this thread to die so close will work, so kick off a timer
+            {
+                closeTimer = new System.Windows.Forms.Timer();
+                closeTimer.Interval = 100;
+                closeTimer.Tick += new EventHandler(CloseItFinally);
+                closeTimer.Start();
+            });
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        void CloseItFinally(Object sender, EventArgs e)
         {
-            //FormSagCarinaMission frm = new FormSagCarinaMission(this);
-            //            frm.Show();
+            if (safeClose.IsAlive)      // still alive, try again
+                closeTimer.Start();
+            else
+            {
+                closeTimer.Stop();      // stop timer now. So it won't try to save it multiple times during close down if it takes a while - this caused a bug in saving some settings
+                SaveSettings();         // do close now
+                Close();
+                Application.Exit();
+            }
+        }
 
-            SystemViewForm frm = new SystemViewForm();
-            frm.Show();
-          
+#endregion
+
+#region Buttons, Mouse, Menus
+
+        private void button_test_Click(object sender, EventArgs e)
+        {
         }
 
         private void addNewStarToolStripMenuItem_Click(object sender, EventArgs e)
@@ -808,15 +1360,15 @@ namespace EDDiscovery
 
         private void eDDiscoveryHomepageToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            Process.Start("http://eddiscovery.astronet.se/");
+            Process.Start("https://github.com/EDDiscovery/EDDiscovery/wiki");
         }
 
         private void openEliteDangerousDirectoryToolStripMenuItem_Click(object sender, EventArgs e)
         {
             try
             {
-                if (EliteDangerous.EDDirectory != null && !EliteDangerous.EDDirectory.Equals(""))
-                    Process.Start(EliteDangerous.EDDirectory);
+                if (EliteDangerousClass.EDDirectory != null && !EliteDangerousClass.EDDirectory.Equals(""))
+                    Process.Start(EliteDangerousClass.EDDirectory);
 
             }
             catch (Exception ex)
@@ -830,7 +1382,15 @@ namespace EDDiscovery
         {
             try
             {
-                Process.Start(travelHistoryControl1.netlog.GetNetLogPath());
+                EDCommander cmdr = EDDConfig.Instance.ListOfCommanders.Find(x => x.Nr == EDDConfig.Instance.CurrentCmdrID);
+
+                if (cmdr != null)
+                {
+                    string cmdrfolder = cmdr.JournalDir;
+                    if (cmdrfolder.Length < 1)
+                        cmdrfolder = EliteDangerous.EDJournalClass.GetDefaultJournalDir();
+                    Process.Start(cmdrfolder);
+                }
             }
             catch (Exception ex)
             {
@@ -838,92 +1398,639 @@ namespace EDDiscovery
             }
         }
 
-        private void statisticsToolStripMenuItem_Click(object sender, EventArgs e)
+        private void show2DMapsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            StatsForm frm = new StatsForm();
-
-            frm.travelhistoryctrl = travelHistoryControl1;
+            FormSagCarinaMission frm = new FormSagCarinaMission(history.FilterByFSDAndPosition);
+            frm.Nowindowreposition = option_nowindowreposition;
             frm.Show();
-
         }
 
-        private void label1_Click(object sender, EventArgs e)
+        private void show3DMapsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-
+            TravelControl.buttonMap_Click(sender, e);
         }
 
-
-
-        private void TestTrileteration()
+        private void forceEDDBUpdateToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            foreach (SystemClass System in SQLiteDBClass.globalSystems)
+            if (!_syncWorker.IsBusy)      // we want it to have run, to completion, to allow another go..
             {
-                if (DateTime.Now.Subtract(System.CreateDate).TotalDays < 60)
+                performeddbsync = true;
+                AsyncPerformSync();
+            }
+            else
+                MessageBox.Show("Synchronisation to databases is in operation or pending, please wait");
+        }
+
+        private void syncEDSMSystemsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (!_syncWorker.IsBusy)      // we want it to have run, to completion, to allow another go..
+            {
+                performedsmsync = true;
+                AsyncPerformSync();
+            }
+            else
+                MessageBox.Show("Synchronisation to databases is in operation or pending, please wait");
+        }
+
+        private void gitHubToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Process.Start("https://github.com/EDDiscovery/EDDiscovery");
+        }
+
+        private void reportIssueIdeasToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Process.Start("https://github.com/EDDiscovery/EDDiscovery/issues");
+        }
+
+        internal void keepOnTopChanged(bool keepOnTop)
+        {
+            this.TopMost = keepOnTop;
+        }
+
+        private void panel_minimize_Click(object sender, EventArgs e)
+        {
+            this.WindowState = FormWindowState.Minimized;
+        }
+
+        private void changeMapColorToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            settings.panel_defaultmapcolor_Click(sender, e);
+        }
+
+        private void editThemeToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            settings.button_edittheme_Click(this, null);
+        }
+
+        private void exitToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Close();
+        }
+
+        private void AboutBox()
+        {
+            AboutForm frm = new AboutForm();
+            frm.labelVersion.Text = this.Text;
+            frm.TopMost = EDDiscoveryForm.EDDConfig.KeepOnTop;
+            frm.ShowDialog(this);
+        }
+
+        private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            AboutBox();
+        }
+
+        private void eDDiscoveryChatDiscordToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Process.Start("https://discord.gg/0qIqfCQbziTWzsQu");
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            // Compatibility movement for Mono
+            if (m.Msg == WM_LBUTTONDOWN && (int)m.WParam == 1 && !theme.WindowsFrame)
+            {
+                int x = unchecked((short)((uint)m.LParam & 0xFFFF));
+                int y = unchecked((short)((uint)m.LParam >> 16));
+                _window_dragMousePos = new Point(x, y);
+                _window_dragWindowPos = this.Location;
+                _window_dragging = true;
+                m.Result = IntPtr.Zero;
+                this.Capture = true;
+            }
+            else if (m.Msg == WM_MOUSEMOVE && (int)m.WParam == 1 && _window_dragging)
+            {
+                int x = unchecked((short)((uint)m.LParam & 0xFFFF));
+                int y = unchecked((short)((uint)m.LParam >> 16));
+                Point delta = new Point(x - _window_dragMousePos.X, y - _window_dragMousePos.Y);
+                _window_dragWindowPos = new Point(_window_dragWindowPos.X + delta.X, _window_dragWindowPos.Y + delta.Y);
+                this.Location = _window_dragWindowPos;
+                this.Update();
+                m.Result = IntPtr.Zero;
+            }
+            else if (m.Msg == WM_LBUTTONUP)
+            {
+                _window_dragging = false;
+                _window_dragMousePos = Point.Empty;
+                _window_dragWindowPos = Point.Empty;
+                m.Result = IntPtr.Zero;
+                this.Capture = false;
+            }
+            // Windows honours NCHITTEST; Mono does not
+            else if (m.Msg == WM_NCHITTEST)
+            {
+                base.WndProc(ref m);
+                //System.Diagnostics.Debug.WriteLine( Environment.TickCount + " Res " + ((int)m.Result));
+
+                if ((int)m.Result == HT_CLIENT)
                 {
-                    //var Distances = from SQLiteDBClass.globalDistances
+                    int x = unchecked((short)((uint)m.LParam & 0xFFFF));
+                    int y = unchecked((short)((uint)m.LParam >> 16));
+                    Point p = PointToClient(new Point(x, y));
 
-                    var distances1 = from p in SQLiteDBClass.dictDistances where p.Value.NameA.ToLower() == System.SearchName select p.Value;
-                    var distances2 = from p in SQLiteDBClass.dictDistances where p.Value.NameB.ToLower() == System.SearchName select p.Value;
-
-                    int nr = distances1.Count();
-                    //nr = distances2.Count();
-
-
-                    if (nr > 4)
+                    if (p.X > this.ClientSize.Width - statusStrip1.Height && p.Y > this.ClientSize.Height - statusStrip1.Height)
                     {
-                        var trilateration = new Trilateration();
-                        //                    trilateration.Logger = (s) => System.Console.WriteLine(s);
+                        m.Result = (IntPtr)HT_BOTTOMRIGHT;
+                    }
+                    else if ( p.Y > this.ClientSize.Height - statusStrip1.Height )
+                    {
+                        m.Result = (IntPtr)HT_BOTTOM;
+                    }
+                    else if (p.X > this.ClientSize.Width - 5)       // 5 is generous.. really only a few pixels gets thru before the subwindows grabs them
+                    {
+                        m.Result = (IntPtr)HT_RIGHT;
+                    }
+                    else if (p.X < 5)
+                    {
+                        m.Result = (IntPtr)HT_LEFT;
+                    }
+                    else if (!theme.WindowsFrame)
+                    {
+                        m.Result = (IntPtr)HT_CAPTION;
+                    }
+                }
+            }
+            else
+            {
+                base.WndProc(ref m);
+            }
+        }
+        
+        private void paneleddiscovery_Click(object sender, EventArgs e)
+        {
+            AboutBox();
+        }
 
-                        foreach (var item in distances1)
+        private void panel_close_Click(object sender, EventArgs e)
+        {
+            Close();
+        }
+
+        private void read21AndFormerLogFilesToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            adminToolStripMenuItem.DropDown.Close();
+            if (DisplayedCommander >= 0)
+            {
+                EDCommander cmdr = EDDConfig.ListOfCommanders.Find(c => c.Nr == DisplayedCommander);
+                if (cmdr != null)
+                {
+                    string netlogpath = cmdr.NetLogDir;
+                    FolderBrowserDialog dirdlg = new FolderBrowserDialog();
+                    if (netlogpath != null && Directory.Exists(netlogpath))
+                    {
+                        dirdlg.SelectedPath = netlogpath;
+                    }
+
+                    DialogResult dlgResult = dirdlg.ShowDialog();
+
+                    if (dlgResult == DialogResult.OK)
+                    {
+                        string logpath = dirdlg.SelectedPath;
+
+                        if (logpath != netlogpath)
                         {
-                            SystemClass distsys = SystemData.GetSystem(item.NameB);
-                            if (distsys != null)
-                            {
-                                if (distsys.HasCoordinate)
-                                {
-                                    Trilateration.Entry entry = new Trilateration.Entry(distsys.x, distsys.y, distsys.z, item.Dist);
-                                    trilateration.AddEntry(entry);
-                                }
-                            }
+                            cmdr.NetLogDir = logpath;
+                            EDDConfig.UpdateCommanders(new List<EDCommander> { cmdr });
                         }
 
-                        foreach (var item in distances2)
-                        {
-                            SystemClass distsys = SystemData.GetSystem(item.NameA);
-                            if (distsys != null)
-                            {
-                                if (distsys.HasCoordinate)
-                                {
-                                    Trilateration.Entry entry = new Trilateration.Entry(distsys.x, distsys.y, distsys.z, item.Dist);
-                                    trilateration.AddEntry(entry);
-                                }
-                            }
-                        }
-
-
-                        var csharpResult = trilateration.Run(Trilateration.Algorithm.RedWizzard_Native);
-                        var javascriptResult = trilateration.Run(Trilateration.Algorithm.RedWizzard_Emulated);
-                        if (javascriptResult.State == Trilateration.ResultState.Exact)
-                            nr++;
+                        //string logpath = "c:\\games\\edlaunch\\products\\elite-dangerous-64\\logs";
+                        RefreshHistoryAsync(netlogpath: logpath, forcenetlogreload: false, currentcmdr: cmdr.Nr);
                     }
                 }
             }
         }
 
-        private void show2DMapsToolStripMenuItem_Click(object sender, EventArgs e)
+        private void read21AndFormerLogFiles_forceReloadLogsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            FormSagCarinaMission frm = new FormSagCarinaMission(this);
+            if (DisplayedCommander >= 0)
+            {
+                EDCommander cmdr = EDDConfig.ListOfCommanders.Find(c => c.Nr == DisplayedCommander);
+                if (cmdr != null)
+                {
+                    string netlogpath = cmdr.NetLogDir;
+                    FolderBrowserDialog dirdlg = new FolderBrowserDialog();
+                    if (netlogpath != null && Directory.Exists(netlogpath))
+                    {
+                        dirdlg.SelectedPath = netlogpath;
+                    }
 
-            frm.Show();
+                    DialogResult dlgResult = dirdlg.ShowDialog();
+
+                    if (dlgResult == DialogResult.OK)
+                    {
+                        string logpath = dirdlg.SelectedPath;
+
+                        if (logpath != netlogpath)
+                        {
+                            cmdr.NetLogDir = logpath;
+                            EDDConfig.UpdateCommanders(new List<EDCommander> { cmdr });
+                        }
+
+                        //string logpath = "c:\\games\\edlaunch\\products\\elite-dangerous-64\\logs";
+                        RefreshHistoryAsync(netlogpath: logpath, forcenetlogreload: true, currentcmdr: cmdr.Nr);
+                    }
+                }
+            }
         }
 
-        private void setDefaultMapColourToolStripMenuItem_Click(object sender, EventArgs e)
+        private void dEBUGResetAllHistoryToFirstCommandeToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            travelHistoryControl1.setDefaultMapColour();
+            if (MessageBox.Show("Confirm you wish to reset all history entries to the current commander", "WARNING", MessageBoxButtons.OKCancel) == DialogResult.OK)
+            {
+                EliteDangerous.JournalEntry.ResetCommanderID(-1, EDDConfig.CurrentCommander.Nr);
+                RefreshHistoryAsync();
+            }
         }
 
-        //Pleiades Sector WU-O B16-0
-        //Pleiades Sector WU-O b6-0
 
+        private void rescanAllJournalFilesToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            RefreshHistoryAsync(forcejournalreload: true, checkedsm: true);
+        }
+
+        private void checkForNewReleaseToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (CheckForNewinstaller())
+            {
+                if (newRelease != null)
+                {
+                    NewReleaseForm frm = new NewReleaseForm();
+                    frm.release = newRelease;
+
+                    frm.ShowDialog(this);
+                }
+            }
+            else
+            {
+                MessageBox.Show("No new release found", "EDDiscovery", MessageBoxButtons.OK);
+            }
+        }
+
+        private void deleteDuplicateFSDJumpEntriesToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (MessageBox.Show("Confirm you remove any duplicate FSD entries from the current commander", "WARNING", MessageBoxButtons.OKCancel) == DialogResult.OK)
+            {
+                int n = EliteDangerous.JournalEntry.RemoveDuplicateFSDEntries(EDDConfig.CurrentCommander.Nr);
+                LogLine("Removed " + n + " FSD entries");
+                RefreshHistoryAsync();
+            }
+        }
+
+        private void panelInfo_Click(object sender, EventArgs e)
+        {
+            if (newRelease != null)
+            {
+                NewReleaseForm frm = new NewReleaseForm();
+                frm.release = newRelease;
+
+                frm.ShowDialog(this);
+            }
+        }
+
+        private void labelPanelText_Click(object sender, EventArgs e)
+        {
+            if (newRelease != null)
+            {
+                NewReleaseForm frm = new NewReleaseForm();
+                frm.release = newRelease;
+
+                frm.ShowDialog(this);
+            }
+        }
+
+        public void Open3DMap(HistoryEntry he)
+        {
+            this.Cursor = Cursors.WaitCursor;
+
+            string HomeSystem = settings.MapHomeSystem;
+
+            history.FillInPositionsFSDJumps();
+
+            Map.Prepare(he?.System, HomeSystem,
+                        settings.MapCentreOnSelection ? he?.System : SystemClass.GetSystem(String.IsNullOrEmpty(HomeSystem) ? "Sol" : HomeSystem),
+                        settings.MapZoom, history.FilterByTravel);
+            Map.Show();
+            this.Cursor = Cursors.Default;
+        }
+        #endregion
+
+        #region Update Data
+
+        protected class RefreshWorkerArgs
+        {
+            public string NetLogPath;
+            public bool ForceNetLogReload;
+            public bool ForceJournalReload;
+            public bool CheckEdsm;
+            public int CurrentCommander;
+        }
+
+        protected class RefreshWorkerResults
+        {
+            public List<HistoryEntry> rethistory;
+            public MaterialCommoditiesLedger retledger;
+            public StarScan retstarscan;
+        }
+
+        public void RefreshHistoryAsync(string netlogpath = null, bool forcenetlogreload = false, bool forcejournalreload = false, bool checkedsm = false, int? currentcmdr = null)
+        {
+            if (PendingClose)
+            {
+                return;
+            }
+
+            if (!_refreshWorker.IsBusy)
+            {
+                travelHistoryControl1.RefreshButton(false);
+                journalViewControl1.RefreshButton(false);
+
+                journalmonitor.StopMonitor();          // this is called by the foreground.  Ensure background is stopped.  Foreground must restart it.
+
+                RefreshWorkerArgs args = new RefreshWorkerArgs
+                {
+                    NetLogPath = netlogpath,
+                    ForceNetLogReload = forcenetlogreload,
+                    ForceJournalReload = forcejournalreload,
+                    CheckEdsm = checkedsm,
+                    CurrentCommander = currentcmdr ?? DisplayedCommander
+                };
+                _refreshWorker.RunWorkerAsync(args);
+            }
+        }
+
+        public void CancelHistoryRefresh()
+        {
+            _refreshWorker.CancelAsync();
+        }
+
+        private void RefreshHistoryWorker(object sender, DoWorkEventArgs e)
+        {
+            RefreshWorkerArgs args = e.Argument as RefreshWorkerArgs;
+            var worker = (BackgroundWorker)sender;
+
+            List<HistoryEntry> hl = new List<HistoryEntry>();
+
+            if (args.CurrentCommander >= 0)
+            {
+                journalmonitor.ParseJournalFiles(() => worker.CancellationPending, (p, s) => worker.ReportProgress(p, s), forceReload: args.ForceJournalReload);   // Parse files stop monitor..
+
+                if (args != null)
+                {
+                    if (args.NetLogPath != null)
+                    {
+                        string errstr = null;
+                        NetLogClass.ParseFiles(args.NetLogPath, out errstr, EDDConfig.Instance.DefaultMapColour, () => worker.CancellationPending, (p, s) => worker.ReportProgress(p, s), args.ForceNetLogReload, currentcmdrid: args.CurrentCommander);
+                    }
+                }
+            }
+
+            worker.ReportProgress(-1, "Resolving systems");
+
+            List<EliteDangerous.JournalEntry> jlist = EliteDangerous.JournalEntry.GetAll(args.CurrentCommander).OrderBy(x => x.EventTimeUTC).ThenBy(x => x.Id).ToList();
+            List<Tuple<EliteDangerous.JournalEntry, HistoryEntry>> jlistUpdated = new List<Tuple<EliteDangerous.JournalEntry, HistoryEntry>>();
+
+            using (SQLiteConnectionSystem conn = new SQLiteConnectionSystem())
+            {
+                HistoryEntry prev = null;
+                foreach (EliteDangerous.JournalEntry je in jlist)
+                {
+                    bool journalupdate = false;
+                    HistoryEntry he = HistoryEntry.FromJournalEntry(je, prev, args.CheckEdsm, out journalupdate, conn);
+                    prev = he;
+
+                    hl.Add(he);                        // add to the history list here..
+
+                    if (journalupdate)
+                    {
+                        jlistUpdated.Add(new Tuple<EliteDangerous.JournalEntry, HistoryEntry>(je, he));
+                    }
+                }
+            }
+
+            MaterialCommoditiesLedger matcommodledger = new MaterialCommoditiesLedger();
+            StarScan starscan = new StarScan();
+
+            ProcessUserHistoryListEntries(hl, matcommodledger, starscan);      // here, we update the DBs in HistoryEntry and any global DBs in historylist
+
+            if (worker.CancellationPending)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            if (jlistUpdated.Count > 0)
+            {
+                worker.ReportProgress(-1, "Updating journal entries");
+
+                using (SQLiteConnectionUser conn = new SQLiteConnectionUser(utc: true))
+                {
+                    using (DbTransaction txn = conn.BeginTransaction())
+                    {
+                        foreach (Tuple<EliteDangerous.JournalEntry, HistoryEntry> jehe in jlistUpdated)
+                        {
+                            EliteDangerous.JournalEntry je = jehe.Item1;
+                            HistoryEntry he = jehe.Item2;
+                            EliteDangerous.JournalEvents.JournalFSDJump jfsd = je as EliteDangerous.JournalEvents.JournalFSDJump;
+                            if (jfsd != null)
+                            {
+                                EliteDangerous.JournalEntry.UpdateEDSMIDPosJump(jfsd.Id, he.System, !jfsd.HasCoordinate && he.System.HasCoordinate, jfsd.JumpDist, conn, txn);
+                            }
+                        }
+
+                        txn.Commit();
+                    }
+                }
+            }
+
+            if (worker.CancellationPending)
+            {
+                e.Cancel = true;
+            }
+            else
+            {
+                e.Result = new RefreshWorkerResults { rethistory = hl, retledger = matcommodledger, retstarscan = starscan };
+            }
+        }
+
+        private void RefreshHistoryWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            if (!e.Cancelled && !PendingClose)
+            {
+                if (e.Error != null)
+                {
+                    LogLineHighlight("History Refresh Error: " + e.Error.Message);
+                }
+                else
+                {
+                    travelHistoryControl1.LoadCommandersListBox();             // in case a new commander has been detected
+                    settings.UpdateCommandersListBox();
+
+                    history.Clear();
+
+                    foreach (var ent in ((RefreshWorkerResults)e.Result).rethistory)
+                    {
+                        history.Add(ent);
+                        Debug.Assert(ent.MaterialCommodity != null);
+                    }
+
+                    history.materialcommodititiesledger = ((RefreshWorkerResults)e.Result).retledger;
+                    history.starscan = ((RefreshWorkerResults)e.Result).retstarscan;
+
+                    ReportProgress(-1, "");
+                    LogLine("Refresh Complete." );
+
+                    if (OnHistoryChange != null)
+                        OnHistoryChange(history);
+                }
+
+                travelHistoryControl1.RefreshButton(true);
+                journalViewControl1.RefreshButton(true);
+
+                if (HistoryRefreshed != null)
+                    HistoryRefreshed(this, EventArgs.Empty);
+
+                journalmonitor.StartMonitor();
+            }
+        }
+
+        private void RefreshHistoryWorkerProgressChanged(object sender, ProgressChangedEventArgs e)
+        {
+            string name = (string)e.UserState;
+            ReportProgress(e.ProgressPercentage, $"Processing log file {name}");
+        }
+
+        // go thru the hisotry list and reworkout the materials ledge and the materials count
+        private void ProcessUserHistoryListEntries(List<HistoryEntry> hl, MaterialCommoditiesLedger ledger, StarScan scan)
+        {
+            using (SQLiteConnectionUser conn = new SQLiteConnectionUser())      // splitting the update into two, one using system, one using user helped
+            {
+                for (int i = 0; i < hl.Count; i++)
+                {
+                    HistoryEntry he = hl[i];
+                    JournalEntry je = he.journalEntry;
+                    he.ProcessWithUserDb(je, (i > 0) ? hl[i - 1] : null, conn);        // let the HE do what it wants to with the user db
+
+                    Debug.Assert(he.MaterialCommodity != null);
+
+                    ledger.Process(je, conn);            // update the ledger
+
+                    if (je.EventTypeID == JournalTypeEnum.Scan)
+                    {
+                        if (!AddScanToBestSystem(scan, je as JournalScan, i, hl))
+                        {
+                            System.Diagnostics.Debug.WriteLine("******** Cannot add scan to system " + (je as JournalScan).BodyName + " in " + he.System.name);
+                        }
+                    }
+                }
+            }
+        }
+
+        private bool AddScanToBestSystem(StarScan starscan, JournalScan je, int startindex, List<HistoryEntry> hl)
+        {
+            for (int j = startindex; j >= 0; j--)
+            {
+                if (je.IsStarNameRelated(hl[j].System.name))       // if its part of the name, use it
+                {
+                    return starscan.Process(je, hl[j].System);
+                }
+            }
+
+            return starscan.Process(je, hl[startindex].System);         // no relationship, add..
+        }
+
+        public void RefreshDisplays()
+        {
+            if (OnHistoryChange != null)
+                OnHistoryChange(history);
+        }
+
+        public void NewPosition(EliteDangerous.JournalEntry je)
+        {
+            Debug.Assert(Application.MessageLoop);              // ensure.. paranoia
+
+            if (je.CommanderId == DisplayedCommander)     // we are only interested at this point accepting ones for the display commander
+            {
+                HistoryEntry last = history.GetLast;
+
+                bool journalupdate = false;
+                HistoryEntry he = HistoryEntry.FromJournalEntry(je, last, true, out journalupdate);
+
+                if (journalupdate)
+                {
+                    EliteDangerous.JournalEvents.JournalFSDJump jfsd = je as EliteDangerous.JournalEvents.JournalFSDJump;
+
+                    if (jfsd != null)
+                    {
+                        EliteDangerous.JournalEntry.UpdateEDSMIDPosJump(jfsd.Id, he.System, !jfsd.HasCoordinate && he.System.HasCoordinate, jfsd.JumpDist);
+                    }
+                }
+
+                using (SQLiteConnectionUser conn = new SQLiteConnectionUser())
+                {
+                    he.ProcessWithUserDb(je, last, conn);           // let some processes which need the user db to work
+
+                    history.materialcommodititiesledger.Process(je, conn);
+                }
+
+                history.Add(he);
+
+                if (je.EventTypeID == JournalTypeEnum.Scan)
+                {
+                    JournalScan js = je as JournalScan;
+                    if (!AddScanToBestSystem(history.starscan, js, history.Count - 1, history.EntryOrder))
+                    {
+                        LogLineHighlight("Cannot add scan to system - alert the EDDiscovery developers using either discord or Github (see help)" + Environment.NewLine +
+                                         "Scan object " + js.BodyName + " in " + he.System.name);
+                    }
+                }
+
+                if (OnNewEntry != null)
+                    OnNewEntry(he,history);
+
+                if (je.EventTypeID == EliteDangerous.JournalTypeEnum.Scan)
+                    travelHistoryControl1.NewBodyScan(je as EliteDangerous.JournalEvents.JournalScan);
+            }
+
+            travelHistoryControl1.LoadCommandersListBox();  // because we may have new commanders
+            settings.UpdateCommandersListBox();
+        }
+
+        public void RecalculateHistoryDBs()         // call when you need to recalc the history dbs - not the whole history. Use RefreshAsync for that
+        {
+            MaterialCommoditiesLedger matcommodledger = new MaterialCommoditiesLedger();
+            StarScan starscan = new StarScan();
+
+            ProcessUserHistoryListEntries(history.EntryOrder, matcommodledger, starscan);
+
+            history.materialcommodititiesledger = matcommodledger; ;
+            history.starscan = starscan;
+
+            if (OnHistoryChange != null)
+                OnHistoryChange(history);
+        }
+
+
+        #endregion
+
+
+
+        private void sendUnsuncedEDDNEventsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            EDDNSync sync = new EDDNSync(this);
+
+            EDDNClass eddn = new EDDNClass();
+            sync.StartSync(eddn, EDDiscoveryForm.EDDConfig.CurrentCommander.SyncToEddn);
+
+        }
+
+        private void materialSearchToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            FindMaterialsForm frm = new FindMaterialsForm();
+
+            frm.Show(this);
+
+
+        }
     }
 }
+

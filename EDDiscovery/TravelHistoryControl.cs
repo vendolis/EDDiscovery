@@ -1,400 +1,565 @@
 ﻿using System;
-using System.CodeDom;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
-using System.Data;
 using System.Linq;
-using System.Text;
 using System.Windows.Forms;
-using System.IO;
-using System.Collections;
-using System.Data.SQLite;
 using EDDiscovery.DB;
 using System.Diagnostics;
 using EDDiscovery2;
 using EDDiscovery2.DB;
-using System.Globalization;
-using System.Text.RegularExpressions;
-using EDDiscovery2.Trilateration;
 using EDDiscovery2.EDSM;
+using System.Threading.Tasks;
+using EDDiscovery.Controls;
+using System.Threading;
+using System.Collections.Concurrent;
+using EDDiscovery.EDSM;
+using EDDiscovery.EliteDangerous;
+using EDDiscovery.EDDN;
+using EDDiscovery.EliteDangerous.JournalEvents;
+using Newtonsoft.Json.Linq;
+using EDDiscovery.Export;
+using EDDiscovery.UserControls;
+using EDDiscovery.Forms;
 
 namespace EDDiscovery
 {
     public partial class TravelHistoryControl : UserControl
     {
-        private EDDiscoveryForm _discoveryForm;
-        private int defaultColour;
-        public EDSMSync sync;
-        string datapath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\Frontier_Development_s\\Products"; // \\FORC-FDEV-D-1001\\Logs\\";
+        private const string SingleCoordinateFormat = "0.##";
 
-        internal List<SystemPosition> visitedSystems;
+        public EDDiscoveryForm _discoveryForm;
 
-        public NetLogClass netlog = new NetLogClass();
-        List<SystemDist> sysDist = null;
-        private SystemPosition currentSysPos = null;
+        SummaryPopOut summaryPopOut = null;
+        List<EDCommander> commanders = null;
 
+        Forms.UserControlFormList usercontrolsforms;
 
-        private static RichTextBox static_richTextBox;
+        ComputeStarDistance csd = new ComputeStarDistance();
+        string lastclosestname;
+        SortedList<double, ISystem> lastclosestsystems;
+
+        public TravelHistoryFilter GetPrimaryFilter { get { return userControlTravelGrid.GetHistoryFilter; } }  // some classes want to know out filter
+
+        // Subscribe to these to get various events - layout controls via their Init function do this.
+
+        public delegate void TravelSelectionChanged(HistoryEntry he, HistoryList hl);
+        public event TravelSelectionChanged OnTravelSelectionChanged;
+
+        string[] popoutlist = new string[] { "S-Panel", "Trip-Panel", "Log", "Nearest Stars" , "Materials",
+                                            "Commodities" , "Ledger" , "Journal", "Travel Grid" , "Screen Shot", "Statistics" , "Scan" };
+
+        Bitmap[] popoutbitmaps = new Bitmap[] { EDDiscovery.Properties.Resources.Log,      // Match pop out enum PopOuts
+                                        EDDiscovery.Properties.Resources.star,      // 2
+                                        EDDiscovery.Properties.Resources.material , // 3
+                                        EDDiscovery.Properties.Resources.commodities, // 4
+                                        EDDiscovery.Properties.Resources.ledger , //5 
+                                        EDDiscovery.Properties.Resources.journal , //6
+                                        EDDiscovery.Properties.Resources.travelgrid , //7 
+                                        EDDiscovery.Properties.Resources.screenshot, //8
+                                        EDDiscovery.Properties.Resources.stats, //9
+                                        EDDiscovery.Properties.Resources.scan, // 10
+                                        };
+
+        string[] popouttooltips = new string[] { "Display the program log",
+                                               "Display the nearest stars to the currently selected entry",
+                                               "Display the material count at the currently selected entry",
+                                               "Display the commodity count at the currently selected entry",
+                                               "Display a ledger of cash related entries",
+                                               "Display the journal grid view",
+                                               "Display the history grid view",
+                                               "Display the screen shot view",
+                                               "Display statistics from the history",
+                                               "Display scan data"
+                                            };
+
+        public enum PopOuts        // in order added to tabcontrol and in order added to combo box
+        {
+            Log = 1,
+            NS = 2,
+            Materials = 3,
+            Commodities = 4,
+            Ledger = 5,
+            Journal = 6,
+            TravelGrid = 7,
+            ScreenShot = 8,
+            Statistics = 9,
+            Scan = 10
+        };
+        
+        #region Initialisation
 
         public TravelHistoryControl()
         {
             InitializeComponent();
-            static_richTextBox = richTextBox_History;
-
         }
 
         public void InitControl(EDDiscoveryForm discoveryForm)
         {
             _discoveryForm = discoveryForm;
-            sync = new EDSMSync(_discoveryForm);
-            var db = new SQLiteDBClass();
-            defaultColour = db.GetSettingInt("DefaultMap", Color.Red.ToArgb());
+
+            usercontrolsforms = new UserControlFormList();
+
+            richTextBoxNote.TextBoxChanged += richTextBoxNote_TextChanged;
+
+            LoadCommandersListBox();
+
+            comboBoxCustomPopOut.Enabled = false;
+
+            comboBoxCustomPopOut.Items.AddRange(popoutlist);
+            comboBoxCustomPopOut.SelectedIndex = 0;
+            comboBoxCustomPopOut.Enabled = true;
+
+            userControlTravelGrid.Init(_discoveryForm, 0);       // primary first instance - this registers with events in discoveryform to get info
+                                                        // then this display, to update its own controls..
+            userControlTravelGrid.OnRedisplay += UpdatedDisplay;        // call back when you've added a new entry..
+            userControlTravelGrid.OnAddedNewEntry += UpdatedWithAddNewEntry;        // call back when you've added a new entry..
+            userControlTravelGrid.OnChangedSelection += ChangedSelection;   // and if the user clicks on something
+            userControlTravelGrid.OnResort += Resort;   // and if he or she resorts
+            userControlTravelGrid.OnPopOut += TGPopOut;
+
+            TabConfigure(tabStripBottom,1000);          // codes are used to save info, 0 = primary (journal/travelgrid), 1..N are popups, these are embedded UCs
+            TabConfigure(tabStripBottomRight,1001);
+            TabConfigure(tabStripMiddleRight,1002);
+
+            csd.Init(_discoveryForm);
+            csd.OnOtherStarDistances += OtherStarDistances;
+            csd.OnNewStarList += NewStarListComputed;
+
+            textBoxTarget.SetAutoCompletor(EDDiscovery.DB.SystemClass.ReturnSystemListForAutoComplete);
+
+            buttonSync.Enabled = EDDiscoveryForm.EDDConfig.CurrentCommander.SyncToEdsm | EDDiscoveryForm.EDDConfig.CurrentCommander.SyncFromEdsm;
         }
 
-
-        private void button_RefreshHistory_Click(object sender, EventArgs e)
+        public void LoadControl()
         {
-            visitedSystems = null;
+            csd.StartComputeThread();
+        }
 
-            TriggerEDSMRefresh();
-            RefreshHistory();
+        #endregion
+
+        #region TAB control
+
+        void TabConfigure(TabStrip t, int displayno)
+        {
+            t.Images = popoutbitmaps;
+            t.ToolTips = popouttooltips;
+            t.Tag = displayno;             // these are IDs for purposes of identifying different instances of a control.. 0 = main ones (main travel grid, main tab journal). 1..N are popups
+            t.OnRemoving += TabRemoved;
+            t.OnCreateTab += TabCreate;
+            t.OnPostCreateTab += TabPostCreate;
+            t.OnPopOut += TabPopOut;
+        }
+
+        void TabRemoved(TabStrip t, Control c )     // called by tab strip when a control is removed
+        {
+            UserControlCommonBase uccb = c as UserControlCommonBase;
+            uccb.Closing();
+        }
+
+        Control TabCreate(TabStrip t, int si)        // called by tab strip when selected index changes.. create a new one.. only create.
+        {   
+            PopOuts i = (PopOuts)(si + 1);
+
+            if (i == PopOuts.Log)
+                return new UserControlLog();
+            else if (i == PopOuts.NS)
+                return new UserControlStarDistance();
+            else if (i == PopOuts.Materials)
+                return new UserControlMaterials();
+            else if (i == PopOuts.Commodities)
+                return new UserControlCommodities();
+            else if (i == PopOuts.Ledger)
+                return new UserControlLedger();
+            else if (i == PopOuts.Journal)
+                return new UserControlJournalGrid();
+            else if (i == PopOuts.TravelGrid)
+                return new UserControlTravelGrid();
+            else if (i == PopOuts.ScreenShot)
+                return new UserControlScreenshot();
+            else if (i == PopOuts.Statistics)
+                return new UserControlStats();
+            else if (i == PopOuts.Scan)
+                return new UserControlScan();
+            else
+                return null;
+        }
+
+        void TabPostCreate(TabStrip t, Control ctrl , int i)        // called by tab strip after control has been added..
+        {                                                           // now we can do the configure of it, with the knowledge the tab has the right size
+            int displaynumber = (int)t.Tag;                         // tab strip - use tag to remember display id which helps us save context.
+
+            if (ctrl is UserControlLog)
+            {
+                UserControlLog sc = ctrl as UserControlLog;
+                sc.Text = "Log";
+                sc.Init(_discoveryForm, displaynumber);
+                sc.AppendText(_discoveryForm.LogText, _discoveryForm.theme.TextBlockColor);
+            }
+            else if (ctrl is UserControlStarDistance)
+            {
+                UserControlStarDistance sc = ctrl as UserControlStarDistance;
+                sc.Text = "Stars";
+                sc.Init(_discoveryForm, displaynumber);
+                if (lastclosestsystems != null)           // if we have some, fill in this grid
+                    sc.FillGrid(lastclosestname, lastclosestsystems);
+            }
+            else if (ctrl is UserControlMaterials)
+            {
+                UserControlMaterials ucm = ctrl as UserControlMaterials;
+                ucm.OnChangedCount += MaterialCommodityChangeCount;
+                ucm.OnRequestRefresh += MaterialCommodityRequireRefresh;
+                ucm.Init(_discoveryForm, displaynumber);
+                ucm.LoadLayout();
+                ucm.Text = "Materials";
+                if (userControlTravelGrid.GetCurrentHistoryEntry != null)
+                    ucm.Display(userControlTravelGrid.GetCurrentHistoryEntry.MaterialCommodity.Sort(false));
+            }
+            else if (ctrl is UserControlCommodities)
+            {
+                UserControlCommodities ucm = ctrl as UserControlCommodities;
+                ucm.Init(_discoveryForm, displaynumber);
+                ucm.OnChangedCount += MaterialCommodityChangeCount;
+                ucm.OnRequestRefresh += MaterialCommodityRequireRefresh;
+                ucm.LoadLayout();
+                ucm.Text = "Commodities";
+                if (userControlTravelGrid.GetCurrentHistoryEntry != null)
+                    ucm.Display(userControlTravelGrid.GetCurrentHistoryEntry.MaterialCommodity.Sort(true));
+            }
+            else if (ctrl is UserControlLedger)
+            {
+                UserControlLedger ucm = ctrl as UserControlLedger;
+                ucm.Init(_discoveryForm, displaynumber);
+                ucm.LoadLayout();
+                ucm.Text = "Ledger";
+                ucm.OnGotoJID += GotoJID;
+                ucm.Display(_discoveryForm.history.materialcommodititiesledger);
+            }
+            else if (ctrl is UserControlJournalGrid)
+            {
+                UserControlJournalGrid ucm = ctrl as UserControlJournalGrid;
+                ucm.Init(_discoveryForm, displaynumber);
+                ucm.LoadLayout();
+                ucm.Text = "Journal";
+                ucm.Display(_discoveryForm.history);
+                ucm.NoHistoryIcon();
+                ucm.NoPopOutIcon();
+            }
+            else if (ctrl is UserControlTravelGrid)
+            {
+                UserControlTravelGrid ucm = ctrl as UserControlTravelGrid;
+                ucm.Init(_discoveryForm, displaynumber);
+                ucm.NoHistoryIcon();
+                ucm.NoPopOutIcon();
+                ucm.LoadLayout();
+                ucm.Text = "History";
+                ucm.Display(_discoveryForm.history);
+                ucm.NoHistoryIcon();
+                ucm.NoPopOutIcon();
+            }
+            else if (ctrl is UserControlScreenshot)
+            {
+                UserControlScreenshot ucm = ctrl as UserControlScreenshot;
+                ucm.Init(_discoveryForm, displaynumber);
+                ucm.LoadLayout();
+                ucm.Text = "Screen Shot";
+            }
+            else if (ctrl is UserControlStats)
+            {
+                UserControlStats ucm = ctrl as UserControlStats;
+                ucm.Init(_discoveryForm, displaynumber);
+                ucm.LoadLayout();
+                ucm.Text = "Statistics";
+                ucm.SelectionChanged(userControlTravelGrid.GetCurrentHistoryEntry, _discoveryForm.history);
+            }
+            else if (ctrl is UserControlScan)
+            {
+                UserControlScan ucm = ctrl as UserControlScan;
+                ucm.Init(_discoveryForm, displaynumber);
+                ucm.LoadLayout();
+                ucm.Text = "Scan";
+                ucm.Display(userControlTravelGrid.GetCurrentHistoryEntry, _discoveryForm.history);
+            }
+
+            System.Diagnostics.Debug.WriteLine("And theme {0}", i);
+            _discoveryForm.theme.ApplyToControls(t);
+        }
+
+        void TabPopOut(TabStrip t, int i)        // pop out clicked
+        {
+            PopOut((PopOuts)(i+1));
+        }
+
+        #endregion
+
+        #region Panel sizing
+
+        private void panel_topright_Resize(object sender, EventArgs e)
+        {
+            // Move controls around on topright
+
+            int width = panel_topright.Width;
+            int butoffsetx = buttonMap.Location.X - buttonMap2D.Location.X;
+            int butoffsety = buttonMap2D.Location.Y - button_RefreshHistory.Location.Y;
+
+            // always 2dmap, 3dmap
+
+            comboBoxCommander.Width = Math.Min(Math.Max(width - comboBoxCommander.Location.X - 4,64),192);
+
+            if ( width >= buttonMap2D.Location.X + butoffsetx * 3 + buttonSync.Width + 4)  // other two buttons beside (2, 4)
+            {
+                comboBoxCustomPopOut.Location = new Point(buttonMap2D.Location.X + butoffsetx * 2, buttonMap2D.Location.Y);
+                buttonSync.Location = new Point(buttonMap2D.Location.X + butoffsetx * 3, buttonMap2D.Location.Y);
+            }
+            else if (width >= buttonMap2D.Location.X + butoffsetx *2 + comboBoxCustomPopOut.Width + 4)   // one button beside, on below (2,3,1)
+            {
+                comboBoxCustomPopOut.Location = new Point(buttonMap2D.Location.X + butoffsetx * 2, buttonMap2D.Location.Y);
+                buttonSync.Location = new Point(buttonMap2D.Location.X, buttonMap2D.Location.Y + butoffsety);
+            }
+            else  // 2,2,2
+            {
+                comboBoxCustomPopOut.Location = new Point(buttonMap2D.Location.X, buttonMap2D.Location.Y + butoffsety);
+                buttonSync.Location = new Point(buttonMap2D.Location.X + butoffsetx , comboBoxCustomPopOut.Location.Y);
+            }
             
+            panel_topright.Size = new Size(panel_topright.Width, buttonSync.Location.Y + buttonSync.Height + 6);
 
-            EliteDangerous.CheckED();
+            // now do this in topright, because its moving around the lower panes. Works in here because topright won't be resized.
+
+            int rossright = buttonRoss.Location.X + buttonRoss.Width;       // from the system panel, far right part
+
+            if (width > rossright + 100)                                    // enough space to more to the right of topright panel?
+                panel_system.Dock = DockStyle.Left;
+            else
+                panel_system.Dock = DockStyle.Top;
+
+            panel_system.Size = new Size(rossright + 4, textBoxGovernment.Location.Y + textBoxGovernment.Height + 6);
+
+            panelTarget.Width = panelNoteArea.Width = width - panel_system.Width;   // and size the target and note panels to..
         }
 
-        public void TriggerEDSMRefresh()
+        private void panelNoteArea_Resize(object sender, EventArgs e)
         {
-            SQLiteDBClass db = new SQLiteDBClass();
-            EDSMClass edsm = new EDSMClass();
-            edsm.GetNewSystems(db);
-            db.GetAllSystems();
-        }
-     
+            int width = panelNoteArea.Width;
 
-        static public void LogText(string text)
+            if (width > 300)                              // can we fit onto one line?
+            {
+                labelNote.Location = new Point(2, 2);
+                richTextBoxNote.Location = new Point(labelNote.Location.X + labelNote.Width + 6, labelNote.Location.Y);
+                richTextBoxNote.Width = width - richTextBoxNote.Location.X - 4;
+            }
+            else
+            {
+                labelNote.Location = new Point(2, 2);
+                richTextBoxNote.Location = new Point(2, labelNote.Location.Y + labelNote.Height + 4);
+                richTextBoxNote.Width = width - 4;
+            }
+
+            panelNoteArea.Height = richTextBoxNote.Location.Y + richTextBoxNote.Height + 6;
+        }
+
+        private void panelTarget_Resize(object sender, EventArgs e)
         {
-            LogText(text, Color.Black);
+            int width = panelTarget.Width;
+
+            if (width > 200)                            // can we fit onto one line?
+            {
+                labelTarget.Location = new Point(2, 2);
+                textBoxTarget.Location = new Point(labelTarget.Location.X + labelTarget.Width + 6, labelTarget.Location.Y);
+                textBoxTarget.Width = width - textBoxTarget.Location.X - 16 - textBoxTargetDist.Width;
+                textBoxTargetDist.Location = new Point(textBoxTarget.Location.X + textBoxTarget.Width + 8, labelTarget.Location.Y);
+            }
+            else
+            {
+                labelNote.Location = new Point(2, 2);
+                textBoxTarget.Location = new Point(2, labelNote.Location.Y + labelNote.Height + 8);
+                textBoxTarget.Width = width - 4;
+                textBoxTargetDist.Location = new Point(2, textBoxTarget.Location.Y + textBoxTarget.Height + 8);
+            }
+
+            panelTarget.Height = textBoxTargetDist.Location.Y + textBoxTargetDist.Height + 6;
         }
 
-        static public void LogText( string text, Color color)
+        #endregion
+
+        void GotoJID(long v)
+        {
+            userControlTravelGrid.GotoPosByJID(v);
+        }
+
+        #region New Stars
+
+        private void OtherStarDistances(SortedList<double, ISystem> closestsystemlist, ISystem vsc )       // on thread..
+        {
+            Invoke((MethodInvoker)delegate      // being paranoid about threads..
+            {
+                _discoveryForm.history.CalculateSqDistances(closestsystemlist, vsc.x, vsc.y, vsc.z, 50, true);
+            });
+        }
+
+        private void NewStarListComputed(string name, SortedList<double, ISystem> csl)      // thread..
+        {
+            Invoke((MethodInvoker)delegate
+            {
+                lastclosestname = name;
+                lastclosestsystems = csl;
+                if (tabStripBottom.CurrentControl is UserControlStarDistance)
+                    ((UserControlStarDistance)tabStripBottom.CurrentControl).FillGrid(name, csl);
+                if (tabStripBottomRight.CurrentControl is UserControlStarDistance)
+                    ((UserControlStarDistance)tabStripBottomRight.CurrentControl).FillGrid(name, csl);
+                if (tabStripMiddleRight.CurrentControl is UserControlStarDistance)
+                    ((UserControlStarDistance)tabStripMiddleRight.CurrentControl).FillGrid(name, csl);
+                foreach (UserControlCommonBase uc in usercontrolsforms.GetListOfControls(typeof(UserControlStarDistance)))
+                    ((UserControlStarDistance)uc).FillGrid(name, csl);
+            });
+        }
+
+        public void CloseClosestSystemThread()
+        {
+            csd.StopComputeThread();
+        }
+
+        #endregion
+
+        #region Material Commodities changers
+
+        void MaterialCommodityChangeCount(List<MaterialCommodities> changelist)
+        {
+            HistoryEntry he = userControlTravelGrid.GetCurrentHistoryEntry;
+            long jid = JournalEntry.AddEDDItemSet(EDDiscoveryForm.EDDConfig.CurrentCommander.Nr, he.EventTimeUTC, (he.EntryType == JournalTypeEnum.EDDItemSet) ? he.Journalid : 0, changelist);
+            userControlTravelGrid.SetPreferredJIDAfterRefresh(jid);         // tell the main grid, please find and move here
+            MaterialCommodities.LoadCacheList();        // in case we did anything..
+            _discoveryForm.RefreshHistoryAsync();
+        }
+
+        void MaterialCommodityRequireRefresh()
+        {
+            MaterialCommodities.LoadCacheList();        // in case we did anything..
+            _discoveryForm.RefreshHistoryAsync();
+        }
+
+        #endregion
+
+        #region Display history
+
+        public void UpdatedDisplay(HistoryList hl)                      // called from main travelgrid when refreshed display
+        {
+            ShowSystemInformation(userControlTravelGrid.GetCurrentRow);
+            RedrawSummary();
+            RefreshTargetInfo();
+            UpdateDependentsWithSelection();
+            _discoveryForm.Map.UpdateSystemList(_discoveryForm.history.FilterByTravel);           // update map
+            RedrawTripPanel(hl);
+        }
+
+
+        public void UpdatedWithAddNewEntry(HistoryEntry he, HistoryList hl, bool accepted)     // main travel grid calls after getting a new entry
         {
             try
-            {
-                
-                static_richTextBox.SelectionStart = static_richTextBox.TextLength;
-                static_richTextBox.SelectionLength = 0;
+            {   // try is a bit old, probably do not need it.
+                if (he.IsFSDJump)
+                {
+                    int count = _discoveryForm.history.GetVisitsCount(he.System.name, he.System.id_edsm);
+                    _discoveryForm.LogLine(string.Format("Arrived at system {0} Visit No. {1}", he.System.name, count));
 
-                static_richTextBox.SelectionColor = color;
-                static_richTextBox.AppendText(text);
-                static_richTextBox.SelectionColor = static_richTextBox.ForeColor;
+                    System.Diagnostics.Trace.WriteLine("Arrived at system: " + he.System.name + " " + count + ":th visit.");
 
+                    if (EDDiscoveryForm.EDDConfig.CurrentCommander.SyncToEdsm == true)
+                        EDSMSync.SendTravelLog(he);
+                }
+                if (he.IsFuelScoop)
+                {
+                    HistoryEntry lastFSD = hl.GetLastFSD;
+                    if(lastFSD!=null)
+                        lastFSD.FuelLevel= he.FuelTotal;
+                }
 
+                if (he.ISEDDNMessage)
+                {
+                    if (EDDiscoveryForm.EDDConfig.CurrentCommander.SyncToEddn == true)
+                        EDDNSync.SendEDDNEvent(he);
+                }
 
+                if (he.IsFSDJump || he.EntryType == JournalTypeEnum.Location)
+                    _discoveryForm.Map.UpdateSystemList(_discoveryForm.history.FilterByTravel);           // update map - only cares about FSD changes
 
-                static_richTextBox.SelectionStart = static_richTextBox.Text.Length;
-                static_richTextBox.SelectionLength = 0;
-                static_richTextBox.ScrollToCaret();
-                static_richTextBox.Refresh();
+                if ( accepted )                                                 // if accepted it on main grid..
+                {
+                    RefreshSummaryRow(userControlTravelGrid.GetRow(0), true);   // Tell the summary new row has been added
+                    RefreshTargetInfo();                                        // tell the target system its changed the latest system
+
+                    if (EDDiscoveryForm.EDDConfig.FocusOnNewSystem)   // Move focus to new row
+                    {
+                        userControlTravelGrid.SelectTopRow();
+                        ShowSystemInformation(userControlTravelGrid.GetCurrentRow);
+                        UpdateDependentsWithSelection();
+                    }
+                }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Trace.WriteLine("Exception SystemClass: " + ex.Message);
+                System.Diagnostics.Trace.WriteLine("Exception NewPosition: " + ex.Message);
                 System.Diagnostics.Trace.WriteLine("Trace: " + ex.StackTrace);
             }
+
         }
 
-
-        private void setRowNumber(DataGridView dgv)
+        public void ShowSystemInformation(DataGridViewRow rw)
         {
-            foreach (DataGridViewRow row in dgv.Rows)
+            HistoryEntry syspos = null;
+
+            if (rw == null)
             {
-                row.HeaderCell.Value = (row.Index + 1).ToString();
-            }
-        }
-
-        public void RefreshHistory()
-        {
-            Stopwatch sw1 = new Stopwatch();
-            //richTextBox_History.Clear();
-
-
-            sw1.Start();
-
-
-            TimeSpan maxDataAge = TimeSpan.Zero;
-            int atMost = 0;
-
-            switch (comboBoxHistoryWindow.SelectedIndex)
-            {
-                case 0:
-                    maxDataAge = new TimeSpan(6, 0, 0); // 6 hours
-                    break;
-                case 1:
-                    maxDataAge = new TimeSpan(12, 0, 0); // 12 hours
-                    break;
-                case 2:
-                    maxDataAge = new TimeSpan(24, 0, 0); // 24 hours
-                    break;
-                case 3:
-                    maxDataAge = new TimeSpan(3 * 24, 0, 0); // 3 days
-                    break;
-                case 4:
-                    maxDataAge = new TimeSpan(7 * 24, 0, 0); // 1 week
-                    break;
-                case 5:
-                    maxDataAge = new TimeSpan(14 * 24, 0, 0); // 2 weeks
-                    break;
-                case 6:
-                    maxDataAge = new TimeSpan(30, 0, 0, 0); // 30 days (month)
-                    break;
-                case 7:
-                    atMost = 20; // Last 20
-                    break;
-                case 8:
-                    maxDataAge = new TimeSpan(100000, 24, 0, 0); // all
-                    break;
-                default:
-                    maxDataAge = new TimeSpan(7 * 24, 0, 0); // 1 week (default)
-                    break;
-            }
-
-
-            if (visitedSystems == null || visitedSystems.Count == 0)
-                GetVisitedSystems();
-
-            if (visitedSystems == null)
-                return;
-
-            //var result = visitedSystems.OrderByDescending(a => a.time).ToList<SystemPosition>();
-
-            List<SystemPosition> result;
-            if (atMost > 0)
-            {
-                result = visitedSystems.OrderByDescending(s => s.time).Take(atMost).ToList();
+                textBoxSystem.Text = textBoxX.Text = textBoxY.Text = textBoxZ.Text =
+                textBoxAllegiance.Text = textBoxEconomy.Text = textBoxGovernment.Text =
+                textBoxVisits.Text = textBoxState.Text = textBoxHomeDist.Text = richTextBoxNote.Text = "";
+                buttonRoss.Enabled = buttonEDDB.Enabled = false;
             }
             else
             {
-                var oldestData = DateTime.Now.Subtract(maxDataAge);
-                result = (from systems in visitedSystems where systems.time > oldestData orderby systems.time descending select systems).ToList();
-            }
+                syspos = userControlTravelGrid.GetHistoryEntry(rw.Index);     // reload, it may have changed
+                Debug.Assert(syspos != null);
 
-            //DataTable dt = new DataTable();
-            //dataGridView1.Columns.Clear();
-            //dt.Columns.Add("Time");
-            //dt.Columns.Add("System");
-            //dt.Columns.Add("Distance");
+                _discoveryForm.history.FillEDSM(syspos, reload: true); // Fill in any EDSM info we have
 
+                SystemNoteClass note = userControlTravelGrid.GetSystemNoteClass(rw.Index);
 
-            dataGridView1.Rows.Clear();
+                textBoxSystem.Text = syspos.System.name;
 
-            //dataGridView1.DataSource = dt;
-
-            System.Diagnostics.Trace.WriteLine("SW1: " + (sw1.ElapsedMilliseconds / 1000.0).ToString("0.000"));
-
-
-            for (int ii = 0; ii < result.Count; ii++) //foreach (var item in result)
-            {
-      
-                SystemPosition item = result[ii];
-                SystemPosition item2;
-
-                if (ii < result.Count - 1)
-                    item2 = result[ii + 1];
-                else
-                    item2 = null;
-
-                AddHistoryRow(false, item, item2);
-            }
-
-            System.Diagnostics.Trace.WriteLine("SW2: " + (sw1.ElapsedMilliseconds / 1000.0).ToString("0.000"));
-
-            //setRowNumber(dataGridView1);
-
-            if (dataGridView1.Rows.Count > 0)
-            {
-                lastRowIndex = 0;
-                ShowSystemInformation((SystemPosition)(dataGridView1.Rows[0].Cells[1].Tag));
-            }
-            System.Diagnostics.Trace.WriteLine("SW3: " + (sw1.ElapsedMilliseconds / 1000.0).ToString("0.000"));
-            sw1.Stop();
-
-            if (textBoxFilter.TextLength>0)
-                FilterGridView();
-        }
-
-        private void GetVisitedSystems()
-        {
-            visitedSystems = netlog.ParseFiles(richTextBox_History, defaultColour);
-        }
-
-        private void AddHistoryRow(bool insert, SystemPosition item, SystemPosition item2)
-        {
-            SystemClass sys1 = null, sys2;
-            double dist;
-            
-
-            sys1 = SystemData.GetSystem(item.Name);
-            if (sys1 == null)
-            {
-                sys1 = new SystemClass(item.Name);
-                if (SQLiteDBClass.globalSystemNotes.ContainsKey(sys1.SearchName))
+                if (syspos.System.HasCoordinate)         // cursystem has them?
                 {
-                    sys1.Note = SQLiteDBClass.globalSystemNotes[sys1.SearchName].Note;
-                }
-            }
-            if (item2 != null)
-            {
-                sys2 = SystemData.GetSystem(item2.Name);
-                if (sys2 == null)
-                    sys2 = new SystemClass(item2.Name);
+                    textBoxX.Text = syspos.System.x.ToString(SingleCoordinateFormat);
+                    textBoxY.Text = syspos.System.y.ToString(SingleCoordinateFormat);
+                    textBoxZ.Text = syspos.System.z.ToString(SingleCoordinateFormat);
 
-            }
-            else
-                sys2 = null;
-
-            item.curSystem = sys1;
-            item.prevSystem = sys2;
-            if (!insert)
-            {
-                SystemPosition known = visitedSystems.First(x => x.Name == item.Name);
-                if (known != null) item.vs = known.vs;
-            }
-
-            string diststr = "";
-            dist = 0;
-            if (sys2 != null)
-            {
-
-                if (sys1.HasCoordinate && sys2.HasCoordinate)
-                    dist = SystemData.Distance(sys1, sys2);
-                else
-                {
-
-                    dist = DistanceClass.Distance(sys1, sys2);
-                }
-
-                if (dist > 0)
-                    diststr = dist.ToString("0.00");
-            }
-
-            item.strDistance = diststr;
-
-            //richTextBox_History.AppendText(item.time + " " + item.Name + Environment.NewLine);
-
-                object[] rowobj = { item.time, item.Name, diststr, item.curSystem.Note, "█" };
-                int rownr;
-
-                if (insert)
-                {
-                    dataGridView1.Rows.Insert(0, rowobj);
-                    rownr = 0;
+                    textBoxHomeDist.Text = Math.Sqrt(syspos.System.x * syspos.System.x + syspos.System.y * syspos.System.y + syspos.System.z * syspos.System.z).ToString("0.00");
                 }
                 else
                 {
-                    dataGridView1.Rows.Add(rowobj);
-                    rownr = dataGridView1.Rows.Count - 1;
+                    textBoxX.Text = "?";
+                    textBoxY.Text = "?";
+                    textBoxZ.Text = "?";
+                    textBoxHomeDist.Text = "";
                 }
 
-                var cell = dataGridView1.Rows[rownr].Cells[1];
+                int count = _discoveryForm.history.GetVisitsCount(syspos.System.name, syspos.System.id_edsm);
+                textBoxVisits.Text = count.ToString();
 
-                cell.Tag = item;
+                bool enableedddross = (syspos.System.id_eddb > 0);  // Only enable eddb/ross for system that it knows about
 
-                if (!sys1.HasCoordinate)  // Mark all systems without coordinates
-                    cell.Style.ForeColor = Color.Blue;
+                buttonRoss.Enabled = buttonEDDB.Enabled = enableedddross;
 
-                cell = dataGridView1.Rows[rownr].Cells[4];
-                cell.Style.ForeColor = Color.FromArgb(item.vs == null ? defaultColour : item.vs.MapColour);
+                textBoxAllegiance.Text = EnumStringFormat(syspos.System.allegiance.ToString());
+                textBoxEconomy.Text = EnumStringFormat(syspos.System.primary_economy.ToString());
+                textBoxGovernment.Text = EnumStringFormat(syspos.System.government.ToString());
+                textBoxState.Text = EnumStringFormat(syspos.System.state.ToString());
+                richTextBoxNote.Text = EnumStringFormat(note != null ? note.Note : "");
+
+                csd.Add(syspos.System);     // ONLY use the primary to compute the new list, the call back will populate all of them NewStarListComputed
             }
 
-
-
-        private void ShowSystemInformation(SystemPosition syspos)
-        {
-            if (syspos == null || syspos.Name==null)
-                return;
-
-            currentSysPos = syspos;
-            textBoxSystem.Text = syspos.curSystem.name;
-            textBoxPrevSystem.Clear();
-            textBoxDistance.Text = syspos.strDistance;
-          
-
-            if (syspos.curSystem.HasCoordinate)
-            {
-                textBoxX.Text = syspos.curSystem.x.ToString("#.#####");
-                textBoxY.Text = syspos.curSystem.y.ToString("#.#####");
-                textBoxZ.Text = syspos.curSystem.z.ToString("#.#####");
-
-                textBoxSolDist.Text = Math.Sqrt(syspos.curSystem.x * syspos.curSystem.x + syspos.curSystem.y * syspos.curSystem.y + syspos.curSystem.z * syspos.curSystem.z).ToString("0.00");
-
-                //// For test only
-                //Stopwatch sw = new Stopwatch();
-                //sw.Start();
-                //SuggestedReferences refereces = new SuggestedReferences(syspos.curSystem.x, syspos.curSystem.y, syspos.curSystem.z);
-
-                //ReferenceSystem rsys;
-
-                //for (int ii = 0; ii < 16; ii++)
-                //{
-                //    rsys = refereces.GetCandidate();
-                //    refereces.AddReferenceStar(rsys.System);
-                //    System.Diagnostics.Trace.WriteLine(rsys.System.name + " Dist: " + rsys.Distance.ToString("0.00") + " x:" + rsys.System.x.ToString() + " y:" + rsys.System.y.ToString() + " z:" + rsys.System.z.ToString() );
-                //}
-                //sw.Stop();
-                //System.Diagnostics.Trace.WriteLine("Reference stars time " + sw.Elapsed.TotalSeconds.ToString("0.000s"));
-
-
-            }
-            else
-            {
-                textBoxX.Text = "?";
-                textBoxY.Text = "?";
-                textBoxZ.Text = "?";
-                textBoxSolDist.Text = "";
-
-            }
-
-            int count = GetVisitsCount(syspos.curSystem.name);
-            textBoxVisits.Text = count.ToString();
-
-            if (currentSysPos.curSystem.id_eddb > 0)  // Only enable eddb/ross for system that it knows about
-            {
-                buttonEDDB.Visible = true;
-                buttonRoss.Visible = true;
-            }
-            else
-            {
-                buttonEDDB.Visible = false;
-                buttonRoss.Visible = false;
-            }
-
-
-            textBoxAllegiance.Text = EnumStringFormat(syspos.curSystem.allegiance.ToString());
-            textBoxEconomy.Text = EnumStringFormat(syspos.curSystem.primary_economy.ToString());
-            textBoxGovernment.Text = EnumStringFormat(syspos.curSystem.government.ToString());
-            textBoxState.Text = EnumStringFormat(syspos.curSystem.state.ToString());
-            richTextBoxNote.Text = EnumStringFormat(syspos.curSystem.Note);
-
-            bool distedit = false;
-
-            if (syspos.prevSystem != null)
-            {
-                textBoxPrevSystem.Text = syspos.prevSystem.name;
-
-                if (syspos.curSystem.status == SystemStatusEnum.Unknown || syspos.prevSystem.status == SystemStatusEnum.Unknown)
-                    distedit = true;
-
-            }
-
-            textBoxDistance.Enabled = distedit;
-            buttonUpdate.Enabled = distedit;
-            buttonTrilaterate.Enabled = !syspos.curSystem.HasCoordinate && syspos.curSystem == GetCurrentSystem();
-            //buttonTrilaterate.Enabled = true; // FIXME for debugging only
-
-
-            ShowClosestSystems(syspos.Name);
+            if (OnTravelSelectionChanged != null)
+                OnTravelSelectionChanged(syspos, _discoveryForm.history);
         }
 
         private string EnumStringFormat(string str)
@@ -407,638 +572,642 @@ namespace EDDiscovery
             return str.Replace("_", " ");
         }
 
-        private void ShowClosestSystems(string name)
+        #endregion
+
+
+        #region Grid Layout
+
+        public void LoadLayoutSettings() // called by discovery form by us after its adjusted itself
         {
-            sysDist = new List<SystemDist>();
-            SystemClass LastSystem = null;
-            float dx, dy, dz;
-            double dist;
+            // ORDER IMPORTANT for right outer/inner splitter, otherwise windows fixes it 
 
             try
             {
-                if (name == null)
-                {
-
-                    var result = visitedSystems.OrderByDescending(a => a.time).ToList<SystemPosition>();
-
-
-                    for (int ii = 0; ii < result.Count; ii++) //foreach (var item in result)
-                    {
-                        SystemPosition item = result[ii];
-
-                        LastSystem = SystemData.GetSystem(item.Name);
-                        name = item.Name;
-                        if (LastSystem != null)
-                            break;
-                    }
-
-                }
-                else
-                {
-                    LastSystem = SystemData.GetSystem(name);
-                }
-
-                if (name !=null)
-                    label3.Text = "Closest systems from " + name.ToString();
-
-                listView1.Items.Clear();
-
-                if (LastSystem == null)
-                    return;
-
-                foreach (SystemClass pos in SystemData.SystemList)
-                {
-
-                    dx = (float)(pos.x - LastSystem.x);
-                    dy = (float)(pos.y - LastSystem.y);
-                    dz = (float)(pos.z - LastSystem.z);
-                    dist = dx * dx + dy * dy + dz * dz;
-
-                    //distance = (float)((system.x - arcsystem.x) * (system.x - arcsystem.x) + (system.y - arcsystem.y) * (system.y - arcsystem.y) + (system.z - arcsystem.z) * (system.z - arcsystem.z));
-
-                    if (dist > 0)
-                    {
-                        SystemDist sdist = new SystemDist();
-                        sdist.name = pos.name;
-                        sdist.dist = Math.Sqrt(dist);
-                        sysDist.Add(sdist);
-                    }
-                }
-
-
-                var list = (from t in sysDist orderby t.dist select t).Take(50);
-
-
-
-                foreach (SystemDist sdist in list)
-                {
-                    ListViewItem item = new ListViewItem(sdist.name);
-                    item.SubItems.Add(sdist.dist.ToString("0.00"));
-                    listView1.Items.Add(item);
-                }
-
-
-
+                splitContainerLeftRight.SplitterDistance = SQLiteDBClass.GetSettingInt("TravelControlSpliterLR", splitContainerLeftRight.SplitterDistance);
+                splitContainerLeft.SplitterDistance = SQLiteDBClass.GetSettingInt("TravelControlSpliterL", splitContainerLeft.SplitterDistance);
+                splitContainerRightOuter.SplitterDistance = SQLiteDBClass.GetSettingInt("TravelControlSpliterRO", splitContainerRightOuter.SplitterDistance);
+                splitContainerRightInner.SplitterDistance = SQLiteDBClass.GetSettingInt("TravelControlSpliterR", splitContainerRightInner.SplitterDistance);
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Trace.WriteLine("Exception : " + ex.Message);
-                System.Diagnostics.Trace.WriteLine(ex.StackTrace);
+            catch { };          // so splitter can except, if values are strange, but we don't really care, so lets throw away the exception
 
-               
-            }
+            userControlTravelGrid.LoadLayout();
 
+            // NO NEED to reload the three tabstrips - code below will cause a LoadLayout on the one selected.
+
+            tabStripBottom.SelectedIndex = SQLiteDBClass.GetSettingInt("TravelControlBottomTab", (int)PopOuts.Scan - 1);
+            tabStripBottomRight.SelectedIndex = SQLiteDBClass.GetSettingInt("TravelControlBottomRightTab", (int)PopOuts.Log - 1);
+            tabStripMiddleRight.SelectedIndex = SQLiteDBClass.GetSettingInt("TravelControlMiddleRightTab", (int)PopOuts.NS - 1);
         }
 
-
-        public SystemClass GetCurrentSystem()
+        public void SaveSettings()     // called by form when closing
         {
-            if (visitedSystems.Count == 0)
-            {
-                return null;
-            }
-            return (from systems in visitedSystems orderby systems.time descending select systems.curSystem).First();
+            userControlTravelGrid.Closing();
+            ((UserControlCommonBase)(tabStripBottom.CurrentControl)).Closing();
+            ((UserControlCommonBase)(tabStripBottomRight.CurrentControl)).Closing();
+            ((UserControlCommonBase)(tabStripMiddleRight.CurrentControl)).Closing();
+
+            SQLiteDBClass.PutSettingInt("TravelControlSpliterLR", splitContainerLeftRight.SplitterDistance);
+            SQLiteDBClass.PutSettingInt("TravelControlSpliterL", splitContainerLeft.SplitterDistance);
+            SQLiteDBClass.PutSettingInt("TravelControlSpliterRO", splitContainerRightOuter.SplitterDistance);
+            SQLiteDBClass.PutSettingInt("TravelControlSpliterR", splitContainerRightInner.SplitterDistance);
+
+            SQLiteDBClass.PutSettingInt("TravelControlBottomRightTab", tabStripBottomRight.SelectedIndex);
+            SQLiteDBClass.PutSettingInt("TravelControlBottomTab", tabStripBottom.SelectedIndex);
+            SQLiteDBClass.PutSettingInt("TravelControlMiddleRightTab", tabStripMiddleRight.SelectedIndex);
         }
 
+        #endregion
 
-        private void TravelHistoryControl_Load(object sender, EventArgs e)
+        #region Clicks
+
+        public void LoadCommandersListBox()
         {
-            //if (!this.DesignMode)
-            //    RefreshHistory();
+            comboBoxCommander.Enabled = false;
+            commanders = new List<EDCommander>();
 
+            commanders.Add(new EDCommander(-1, "Hidden log", "", false, false, false));
+            commanders.AddRange(EDDiscoveryForm.EDDConfig.ListOfCommanders);
 
-            if (!this.DesignMode)
-            {
-                var db = new SQLiteDBClass();
-                comboBoxHistoryWindow.SelectedIndex = db.GetSettingInt("EDUIHistory", 4);
-            }
-            // this improves dataGridView's scrolling performance
-            typeof(DataGridView).InvokeMember(
-                "DoubleBuffered",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance |
-                System.Reflection.BindingFlags.SetProperty,
-                null,
-                dataGridView1,
-                new object[] { true }
-            );
-        }
+            comboBoxCommander.DataSource = null;
+            comboBoxCommander.DataSource = commanders;
+            comboBoxCommander.ValueMember = "Nr";
+            comboBoxCommander.DisplayMember = "Name";
 
-        private void comboBoxHistoryWindow_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (visitedSystems != null)
-                RefreshHistory();
-
-            var db = new SQLiteDBClass();
-            db.PutSettingInt("EDUIHistory", comboBoxHistoryWindow.SelectedIndex);
-        }
-
-
-        private void dgv_ColumnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
-        {
-            DataGridViewSorter.DataGridSort(dataGridView1, e.ColumnIndex);
-        }
-
-        private void dataGridView1_CellContentDoubleClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex >= 0)
-            {
-                //string  SysName = dataGridView1.Rows[e.RowIndex].Cells[1].Value.ToString();
-                lastRowIndex = e.RowIndex;
-
-                ShowSystemInformation((SystemPosition)(dataGridView1.Rows[e.RowIndex].Cells[1].Tag));
-            }
-
-        }
-
-    
-
-        private void button2_Click(object sender, EventArgs e)
-        {
-
-
-            var map2 = new FormMap(_discoveryForm.SystemNames);
-            map2.visitedSystems = visitedSystems;
-            map2.Show();
-
-        }
-
-        private void textBox7_TextChanged(object sender, EventArgs e)
-        {
-
-        }
-        private int lastRowIndex;
-        private void dataGridView1_CellClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex >= 0)
-            {
-                //string SysName = dataGridView1.Rows[e.RowIndex].Cells[1].Value.ToString();
-                lastRowIndex = e.RowIndex;
-                ShowSystemInformation((SystemPosition)(dataGridView1.Rows[e.RowIndex].Cells[1].Tag));
-            }
- 
-        }
-
-        private void buttonUpdate_Click(object sender, EventArgs e)
-        {
-            var dist = DistanceAsDouble(textBoxDistance.Text.Trim());
-            
-            if (!dist.HasValue)
-                MessageBox.Show("Distance in wrong format!");
+            if (_discoveryForm.DisplayedCommander == -1)
+                comboBoxCommander.SelectedIndex = 0;
             else
+                comboBoxCommander.SelectedItem = EDDiscoveryForm.EDDConfig.CurrentCommander;
+
+            comboBoxCommander.Enabled = true;
+        }
+
+        private void comboBoxCommander_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (comboBoxCommander.SelectedIndex >= 0 && comboBoxCommander.Enabled)     // DONT trigger during LoadCommandersListBox
             {
-                DistanceClass distance = new DistanceClass();
+                var itm = (EDCommander)comboBoxCommander.SelectedItem;
+                _discoveryForm.DisplayedCommander = itm.Nr;
+                if (itm.Nr >= 0)
+                    EDDiscoveryForm.EDDConfig.CurrentCmdrID = itm.Nr;
 
-                distance.Dist = dist.Value;
-                distance.CreateTime = DateTime.UtcNow;
-                distance.CommanderCreate = textBoxCmdrName.Text.Trim();
-                distance.NameA = textBoxSystem.Text;
-                distance.NameB = textBoxPrevSystem.Text;
-                distance.Status = DistancsEnum.EDDiscovery;
+                buttonSync.Enabled = EDDiscoveryForm.EDDConfig.CurrentCommander.SyncToEdsm | EDDiscoveryForm.EDDConfig.CurrentCommander.SyncFromEdsm;
 
-                distance.Store();
-                SQLiteDBClass.AddDistanceToCache(distance);
-
-                dataGridView1.Rows[lastRowIndex].Cells[2].Value = textBoxDistance.Text.Trim();
+                _discoveryForm.RefreshHistoryAsync();                                   // which will cause DIsplay to be called as some point
             }
         }
 
-        private void textBoxCmdrName_Leave(object sender, EventArgs e)
+        public void buttonMap_Click(object sender, EventArgs e)
         {
-            if (!_discoveryForm.CommanderName.Equals(textBoxCmdrName.Text))
-            {
-                SQLiteDBClass db = new SQLiteDBClass();
+            _discoveryForm.Open3DMap(userControlTravelGrid.GetCurrentHistoryEntry);
+        }
 
-                db.PutSettingString("CommanderName", textBoxCmdrName.Text);
-                //EDDiscoveryForm.CommanderName = textBoxCmdrName.Text;
+        private void Resort()       // user travel grid to say it resorted
+        {
+            RedrawSummary();
+            UpdateDependentsWithSelection();
+        }
+
+        private void ChangedSelection(int rowno, int colno , bool doubleclick , bool note)      // User travel grid call back to say someone clicked somewhere
+        {
+            if (rowno >= 0)
+            {
+                ShowSystemInformation(userControlTravelGrid.GetRow(rowno));
+                UpdateDependentsWithSelection();
+
+                if (doubleclick == false && note)
+                {
+                    richTextBoxNote.TextBox.Select(richTextBoxNote.Text.Length, 0);     // move caret to end and focus.
+                    richTextBoxNote.TextBox.ScrollToCaret();
+                    richTextBoxNote.TextBox.Focus();
+                }
+            }
+        }
+
+        private void UpdateDependentsWithSelection()
+        {
+            if (userControlTravelGrid.currentGridRow >= 0)
+            {
+                HistoryEntry currentsys = userControlTravelGrid.GetCurrentHistoryEntry;
+                _discoveryForm.Map.UpdateHistorySystem(currentsys.System);
+                _discoveryForm.RouteControl.UpdateHistorySystem(currentsys.System.name);
+                _discoveryForm.ExportControl.UpdateHistorySystem(currentsys.System.name);
             }
         }
 
         private void richTextBoxNote_Leave(object sender, EventArgs e)
         {
-
             StoreSystemNote();
+        }
+
+        private void richTextBoxNote_TextChanged(object sender, EventArgs e)
+        {
+            userControlTravelGrid.UpdateCurrentNote(richTextBoxNote.Text);
+
+            foreach (UserControlCommonBase uc in usercontrolsforms.GetListOfControls(typeof(UserControlTravelGrid)))
+                ((UserControlTravelGrid)uc).UpdateNoteJID(userControlTravelGrid.GetCurrentHistoryEntry.Journalid, richTextBoxNote.Text);
         }
 
         private void StoreSystemNote()
         {
-            string txt;
+            if (userControlTravelGrid.currentGridRow < 0)
+                return;
 
             try
             {
-                EDSMClass edsm = new EDSMClass();
-                SQLiteDBClass db = new SQLiteDBClass();
+                HistoryEntry sys = userControlTravelGrid.GetCurrentHistoryEntry;
+                SystemNoteClass sn = userControlTravelGrid.GetCurrentSystemNoteClass;
 
+                string txt = richTextBoxNote.Text.Trim();
 
-                edsm.apiKey = db.GetSettingString("EDSMApiKey", "");
-                edsm.commanderName = db.GetSettingString("CommanderName", "");
-
-                //SystemPosition sp = (SystemPosition)dataGridView1.Rows[lastRowIndex].Cells[1].Tag;
-                txt = richTextBoxNote.Text;
-                if (currentSysPos.curSystem.Note == null)
-                    currentSysPos.curSystem.Note = "";
-
-                if (currentSysPos != null && !txt.Equals(currentSysPos.curSystem.Note))
+                if ( (sn == null && txt.Length>0) || (sn!=null && !sn.Note.Equals(txt))) // if no system note, and text,  or system not is not text
                 {
-                    SystemNoteClass sn;
-                    List<SystemClass> systems = new List<SystemClass>();
-
-                    if (SQLiteDBClass.globalSystemNotes.ContainsKey(currentSysPos.curSystem.SearchName))
-                    {
-                        sn = SQLiteDBClass.globalSystemNotes[currentSysPos.curSystem.SearchName];
+                    if ( sn != null && (sn.Journalid == sys.Journalid || sn.Journalid == 0 || (sn.Name.Equals(sys.System.name, StringComparison.InvariantCultureIgnoreCase) && sn.EdsmId <= 0) || (sn.EdsmId > 0 && sn.EdsmId == sys.System.id_edsm)) )           // already there, update
+                    { 
                         sn.Note = txt;
                         sn.Time = DateTime.Now;
-
+                        sn.Name = (sys.IsFSDJump) ? sys.System.name : "";
+                        sn.Journalid = sys.Journalid;
+                        sn.EdsmId = sys.IsFSDJump ? sys.System.id_edsm : 0;
                         sn.Update();
                     }
                     else
                     {
                         sn = new SystemNoteClass();
-
-                        sn.Name = currentSysPos.curSystem.name;
                         sn.Note = txt;
                         sn.Time = DateTime.Now;
+                        sn.Name = (sys.IsFSDJump) ? sys.System.name : "";
+                        sn.Journalid = sys.Journalid;
+                        sn.EdsmId = sys.IsFSDJump ? sys.System.id_edsm : 0;
                         sn.Add();
+
+                        userControlTravelGrid.UpdateCurrentNoteTag(sn);
                     }
 
-                    
-                    currentSysPos.curSystem.Note = txt;
-                    dataGridView1.Rows[lastRowIndex].Cells[3].Value = txt;
+                    userControlTravelGrid.UpdateCurrentNote(txt);
 
-                    if (edsm.commanderName.Length>1 && edsm.apiKey.Length>1)
-                        edsm.SetComment(sn);
+                    if (EDDiscoveryForm.EDDConfig.CurrentCommander.SyncToEdsm && sys.IsFSDJump )       // only send on FSD jumps
+                        EDSMSync.SendComments(sn.Name,sn.Note,sn.EdsmId);
+
+                    _discoveryForm.Map.UpdateNote();
+                    RefreshSummaryRow(userControlTravelGrid.GetCurrentRow);    // tell it this row was changed
                 }
-
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.WriteLine("Exception : " + ex.Message);
                 System.Diagnostics.Trace.WriteLine(ex.StackTrace);
 
-                LogText("Exception : " + ex.Message, Color.Red);
-                LogText(ex.StackTrace, Color.Red);
+                _discoveryForm.LogLineHighlight("Exception : " + ex.Message);
+                _discoveryForm.LogLineHighlight(ex.StackTrace);
             }
         }
 
         private void buttonSync_Click(object sender, EventArgs e)
         {
-            if (textBoxCmdrName.Text.Equals(""))
-            {
-                MessageBox.Show("Please enter commander name before sending distances/ travel history to EDSM!");
-                return;
-            }
-            var db = new SQLiteDBClass();
-
-
-
-
-            var dists = from p in SQLiteDBClass.dictDistances where p.Value.Status == DistancsEnum.EDDiscovery  orderby p.Value.CreateTime  select p.Value;
-
             EDSMClass edsm = new EDSMClass();
 
-            foreach (var dist in dists)
+            if (!edsm.IsApiKeySet)
             {
-                string json;
-
-                if (dist.Dist > 0)
-                {
-                    LogText("Add distance: " + dist.NameA + " => " + dist.NameB + " :" + dist.Dist.ToString("0.00") + "ly" + Environment.NewLine);
-                    json = edsm.SubmitDistances(textBoxCmdrName.Text, dist.NameA, dist.NameB, dist.Dist);
-                }
-                else
-                {
-                    if (dist.Dist < 0)  // Can removedistance by adding negative value
-                        dist.Delete();
-                    else
-                    {
-                        dist.Status = DistancsEnum.EDDiscoverySubmitted;
-                        dist.Update();
-                    }
-                    json = null;
-                }
-                if (json != null)
-                {
-                    string str="";
-                    bool trilok;
-                    if (edsm.ShowDistanceResponse(json, out str, out trilok))
-                    {
-                        LogText(str);
-                        dist.Status = DistancsEnum.EDDiscoverySubmitted;
-                        dist.Update();
-                    }
-                    else
-                    {
-                        LogText(str);
-                    }
-                }
-            }
-
-            if (db.GetSettingString("EDSMApiKey", "").Equals(""))
-            {
-                MessageBox.Show("Please enter EDSM api key (In settings) before sending travel history to EDSM!");
+                MessageBox.Show("Please ensure a commander is selected and it has a EDSM API key set");
                 return;
-
             }
-            sync.StartSync();
 
-
-        }
-
-        internal void RefreshEDSMEvent(object source)
-        {
-            Invoke((MethodInvoker)delegate
-            {
-                visitedSystems.Clear();
-                RefreshHistory();
-            });
-        }
-
-
-        internal void NewPosition(object source)
-        {
             try
             {
-                string name = netlog.visitedSystems.Last().Name;
-                Invoke((MethodInvoker)delegate
-                {
-                    LogText("Arrived to system: ");
-                    SystemClass sys1 = SystemData.GetSystem(name);
-                    if (sys1 == null || sys1.HasCoordinate == false)
-                        LogText(name , Color.Blue);
-                    else
-                        LogText(name );
-
-
-                    int count = GetVisitsCount(name);
-
-                    LogText("  : Vist nr " + count.ToString()  + Environment.NewLine);
-                    System.Diagnostics.Trace.WriteLine("Arrived to system: " + name + " " + count.ToString() + ":th visit.");
-
-                    var result = visitedSystems.OrderByDescending(a => a.time).ToList<SystemPosition>();
-
-                    //if (TrilaterationControl.Visible)
-                    //{
-                    //    CloseTrilateration();
-                    //    MessageBox.Show("You have arrived to another system while trilaterating."
-                    //                    + " As a pre-caution to prevent any mistakes with submitting wrong systems or distances"
-                    //                    + ", your trilateration was aborted.");
-                    //}
-
-                    
-                    SystemPosition item = result[0];
-                    SystemPosition item2;
-
-                    if (result.Count > 1)
-                        item2 = result[1];
-                    else
-                        item2 = null;
-
-                    // grab distance to next (this) system
-                    textBoxDistanceToNextSystem.Enabled = false;
-                    if (textBoxDistanceToNextSystem.Text.Length > 0 && item2 != null)
-                    {
-                        SystemClass currentSystem = null, previousSystem = null;
-                        SystemData.SystemList.ForEach(s =>
-                        {
-                            if (s.name == item.Name) currentSystem = s;
-                            if (s.name == item2.Name) previousSystem = s;
-                        });
-                        
-                        if (currentSystem == null || previousSystem == null || !currentSystem.HasCoordinate || !previousSystem.HasCoordinate)
-                        {
-                            var presetDistance = DistanceAsDouble(textBoxDistanceToNextSystem.Text.Trim(), 45);
-                            if (presetDistance.HasValue)
-                            {
-                                var distance = new DistanceClass
-                                {
-                                    Dist = presetDistance.Value,
-                                    CreateTime = DateTime.UtcNow,
-                                    CommanderCreate = textBoxCmdrName.Text.Trim(),
-                                    NameA = item.Name,
-                                    NameB = item2.Name,
-                                    Status = DistancsEnum.EDDiscovery
-                                };
-                                Console.Write("Pre-set distance " + distance.NameA + " -> " + distance.NameB + " = " + distance.Dist);
-                                distance.Store();
-                                SQLiteDBClass.AddDistanceToCache(distance);
-                            }
-                        }
-                    }
-                    textBoxDistanceToNextSystem.Clear();
-                    textBoxDistanceToNextSystem.Enabled = true;
-
-                    AddHistoryRow(true, item, item2);
-                    lastRowIndex += 1;
-                    StoreSystemNote();
-                });
+                _discoveryForm.EdsmSync.StartSync(edsm, EDDiscoveryForm.EDDConfig.CurrentCommander.SyncToEdsm, EDDiscoveryForm.EDDConfig.CurrentCommander.SyncFromEdsm, EDDConfig.Instance.DefaultMapColour);
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Trace.WriteLine("Exception NewPosition: " + ex.Message);
-                System.Diagnostics.Trace.WriteLine("Trace: " + ex.StackTrace);
+                _discoveryForm.LogLine($"EDSM Sync failed: {ex.Message}");
             }
-        }
-
-        private int GetVisitsCount(string name)
-        {
-            int count = (from row in visitedSystems
-                         where row.Name == name
-                         select row).Count();
-            return count;
-        }
-
-        private void dataGridView1_RowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
-        {
-            var grid = sender as DataGridView;
-            var rowIdx = (e.RowIndex + 1).ToString();
-
-            var centerFormat = new StringFormat()
-            {
-                // right alignment might actually make more sense for numbers
-                Alignment = StringAlignment.Center,
-                LineAlignment = StringAlignment.Center
-            };
-
-            var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
-            e.Graphics.DrawString(rowIdx, this.Font, SystemBrushes.ControlText, headerBounds, centerFormat);
-
         }
 
         private void buttonEDDB_Click(object sender, EventArgs e)
         {
-            if (currentSysPos.curSystem.id_eddb>0)
-                Process.Start("http://eddb.io/system/" + currentSysPos.curSystem.id_eddb.ToString());
+            HistoryEntry sys = userControlTravelGrid.GetCurrentHistoryEntry;
+
+            if (sys != null && sys.System.id_eddb > 0)
+                Process.Start("http://eddb.io/system/" + sys.System.id_eddb.ToString());
         }
 
         private void buttonRoss_Click(object sender, EventArgs e)
         {
-            if (currentSysPos.curSystem.id_eddb>0)
-                Process.Start("http://ross.eddb.io/system/update/" + currentSysPos.curSystem.id_eddb.ToString());
+            HistoryEntry sys = userControlTravelGrid.GetCurrentHistoryEntry;
+            if (sys != null)
+            {
+                _discoveryForm.history.FillEDSM(sys, reload: true);
+
+                if (sys != null && sys.System.id_eddb > 0)
+                    Process.Start("http://ross.eddb.io/system/update/" + sys.System.id_eddb.ToString());
+            }
+        }
+
+        void gotoEDSM()
+        {
+            HistoryEntry sys = userControlTravelGrid.GetCurrentHistoryEntry;
+
+            if (sys != null)
+                _discoveryForm.history.FillEDSM(sys, reload: true);
+
+            if (sys != null && sys.System != null) // solve a possible exception
+            {
+                if (!String.IsNullOrEmpty(sys.System.name))
+                {
+                    long? id_edsm = sys.System.id_edsm;
+                    if (id_edsm <= 0)
+                    {
+                        id_edsm = null;
+                    }
+
+                    EDSMClass edsm = new EDSMClass();
+                    string url = edsm.GetUrlToEDSMSystem(sys.System.name, id_edsm);
+
+                    if (url.Length > 0)         // may pass back empty string if not known, this solves another exception
+                        Process.Start(url);
+                    else
+                        MessageBox.Show("System unknown to EDSM");
+                }
+            }
+        }
+
+        private void buttonEDSM_Click(object sender, EventArgs e)
+        {
+            gotoEDSM();
+        }
+
+        public void RefreshButton(bool state)
+        {
+            button_RefreshHistory.Enabled = state;
+            foreach (UserControlCommonBase uc in usercontrolsforms.GetListOfControls(typeof(UserControlJournalGrid)))
+                ((UserControlJournalGrid)uc).RefreshButton(state);      // and the journal views need it
+        }
+
+        private void button_RefreshHistory_Click(object sender, EventArgs e)
+        {
+            _discoveryForm.LogLine("Refresh History.");
+            _discoveryForm.RefreshHistoryAsync(checkedsm: true);
+        }
+
+        private void button2DMap_Click(object sender, EventArgs e)
+        {
+            this.Cursor = Cursors.WaitCursor;
+            FormSagCarinaMission frm = new FormSagCarinaMission(_discoveryForm.history.FilterByFSDAndPosition);
+            frm.Nowindowreposition = _discoveryForm.option_nowindowreposition;
+            frm.Show();
+            this.Cursor = Cursors.Default;
         }
         
-        private void buttonTrilaterate_Click(object sender, EventArgs e)
+        private void textBoxTarget_KeyUp(object sender, KeyEventArgs e)
         {
-            TrilaterationControl tctrl = _discoveryForm.trilaterationControl;
-
-            _discoveryForm.ShowTrilaterationTab();
-            tctrl.Set(((SystemPosition)dataGridView1.CurrentRow.Cells[1].Tag).curSystem);
-        }
-    
-		public SystemClass CurrentSystem
-        {
-            get
+            if (e.KeyCode == Keys.Enter)
             {
-                if (dataGridView1 == null || dataGridView1.CurrentRow == null) return null;
-                return ((SystemPosition)dataGridView1.CurrentRow.Cells[1].Tag).curSystem;
-            }
-        }
+                string sn = textBoxTarget.Text;
+                ISystem sc = _discoveryForm.history.FindSystem(sn);
+                string msgboxtext = null;
 
+                if (sc != null && sc.HasCoordinate)
+                {
+                    SystemNoteClass nc = SystemNoteClass.GetNoteOnSystem(sc.name, sc.id_edsm);        // has it got a note?
 
-        public string GetCommanderName()
-        {
-            var value = textBoxCmdrName.Text;
-            return !string.IsNullOrEmpty(value) ? value : null;
-        }
+                    if (nc != null)
+                    {
+                        TargetClass.SetTargetNotedSystem(sc.name, nc.id, sc.x, sc.y, sc.z);
+                        msgboxtext = "Target set on system with note " + sc.name;
+                    }
+                    else
+                    {
+                        BookmarkClass bk = BookmarkClass.FindBookmarkOnSystem(textBoxTarget.Text);    // has it been bookmarked?
 
-        private void textBoxDistanceToNextSystem_Validating(object sender, CancelEventArgs e)
-        {
-            var value = textBoxDistanceToNextSystem.Text.Trim();
-            if (value.Length == 0)
-            {
-                return;
-            }
-            
-            if (!DistanceAsDouble(value, 45).HasValue) // max jump range is ~42Ly
-            {
-                e.Cancel = true;
-            }
-        }
+                        if (bk != null)
+                        {
+                            TargetClass.SetTargetBookmark(sc.name, bk.id, bk.x, bk.y, bk.z);
+                            msgboxtext = "Target set on booked marked system " + sc.name;
+                        }
+                        else
+                        {
+                            if (MessageBox.Show("Make a bookmark on " + sc.name + " and set as target?", "Make Bookmark", MessageBoxButtons.OKCancel) == DialogResult.OK)
+                            {
+                                BookmarkClass newbk = new BookmarkClass();
+                                newbk.StarName = sn;
+                                newbk.x = sc.x;
+                                newbk.y = sc.y;
+                                newbk.z = sc.z;
+                                newbk.Time = DateTime.Now;
+                                newbk.Note = "";
+                                newbk.Add();
+                                TargetClass.SetTargetBookmark(sc.name, newbk.id, newbk.x, newbk.y, newbk.z);
+                            }
+                        }
+                    }
 
-        /// <summary>
-        /// Parse a distance as a positive double, in the formats "xx", "xx.yy", "xx,yy" or "xxxx,yy".
-        /// </summary>
-        /// <param name="value">Decimal string to be parsed.</param>
-        /// <param name="maximum">Upper limit or null if not required.</param>
-        /// <returns>Parsed value or null on conversion failure.</returns>
-        private static double? DistanceAsDouble(string value, double? maximum = null)
-        {
-            if (value.Length == 0)
-            {
-                return null;
-            }
-
-            if (!new Regex(@"^\d+([.,]\d{1,2})?$").IsMatch(value))
-            {
-                return null;
-            }
-
-            double valueDouble;
-
-            // Allow regions with , as decimal separator to  also use . as decimal separator and vice versa
-            var decimalSeparator = CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator;
-            if (!double.TryParse(decimalSeparator == "," ? value.Replace(".", ",") : value.Replace(",", "."), out valueDouble))
-            {
-                return null;
-            }
-
-            if (maximum.HasValue && valueDouble > maximum)
-            {
-                return null;
-            }
-
-            return valueDouble;
-        }
-
-        private void textBoxFilter_KeyUp(object sender, KeyEventArgs e)
-        {
-            FilterGridView();
-        }
-
-        private void FilterGridView()
-        {
-            string searchstr = textBoxFilter.Text.Trim();
-            dataGridView1.SuspendLayout();
-
-            DataGridViewRow[] theRows = new DataGridViewRow[dataGridView1.Rows.Count];
-            dataGridView1.Rows.CopyTo(theRows, 0);
-            dataGridView1.Rows.Clear();
-
-            for (int loop = 0; loop < theRows.Length; loop++)
-            {
-                bool found = false;
-
-                if (searchstr.Length < 1)
-                    found = true;
+                }
                 else
                 {
-                    foreach (DataGridViewCell cell in theRows[loop].Cells)
+                    if (sn.Length > 2 && sn.Substring(0, 2).Equals("G:"))
+                        sn = sn.Substring(2, sn.Length - 2);
+
+                    GalacticMapObject gmo = EDDiscoveryForm.galacticMapping.Find(sn, true, true);    // ignore if its off, find any part of string, find if disabled
+
+                    if (gmo != null)
                     {
-                        if (cell.Value != null)
-                            if (cell.Value.ToString().IndexOf(searchstr, 0, StringComparison.CurrentCultureIgnoreCase) >= 0)
-                            {
-                                found = true;
-                                break;
-                            }
+                        TargetClass.SetTargetGMO("G:" + gmo.name, gmo.id, gmo.points[0].X, gmo.points[0].Y, gmo.points[0].Z);
+                        msgboxtext = "Target set on galaxy object " + gmo.name;
+                    }
+                    else
+                    {
+                        msgboxtext = "Unknown system, system is without co-ordinates or galaxy object not found";
                     }
                 }
-                theRows[loop].Visible = found;
+
+                RefreshTargetInfo();
+                if (_discoveryForm.Map != null)
+                    _discoveryForm.Map.UpdateBookmarksGMO(true);
+
+                if ( msgboxtext != null)
+                    MessageBox.Show(msgboxtext,"Create a target", MessageBoxButtons.OK);
             }
-            dataGridView1.Rows.AddRange(theRows);
-            dataGridView1.ResumeLayout();
         }
 
-        private void textBoxFilter_TextChanged(object sender, EventArgs e)
-        {
 
+        private void comboBoxCustomPopOut_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (!comboBoxCustomPopOut.Enabled)
+                return;
+
+            if (comboBoxCustomPopOut.SelectedIndex == 0)
+                ToggleSummaryPopOut();
+            else if (comboBoxCustomPopOut.SelectedIndex == 1)
+                ToggleTripPanelPopOut();
+            else
+                PopOut((PopOuts)(comboBoxCustomPopOut.SelectedIndex-1));
+
+            comboBoxCustomPopOut.Enabled = false;
+            comboBoxCustomPopOut.SelectedIndex = 0;
+            comboBoxCustomPopOut.Enabled = true;
         }
 
-        private void starMapColourToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            IEnumerable<DataGridViewRow> selectedRows = dataGridView1.SelectedCells.Cast<DataGridViewCell>()
-                                                           .Select(cell => cell.OwningRow)
-                                                           .Distinct();
-            Color colour = selectedRows.First().Cells[4].Style.ForeColor;
-            mapColorDialog.Color = colour;
-            if (mapColorDialog.ShowDialog(this) == DialogResult.OK)
+        public void PopOut(PopOuts selected)
+        { 
+            UserControlForm tcf = usercontrolsforms.NewForm(_discoveryForm.option_nowindowreposition);
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(EDDiscovery.EDDiscoveryForm));
+            tcf.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
+
+            if (selected == PopOuts.Log)
             {
-                this.Cursor = Cursors.WaitCursor;
-                string sysName = "";
-                foreach(DataGridViewRow r in selectedRows)
-                {
-                    r.Cells[4].Style.ForeColor = mapColorDialog.Color;
-                    sysName = r.Cells[1].Value.ToString();
-                    SystemPosition sp = visitedSystems.First(s => s.Name.ToUpperInvariant() == sysName.ToUpperInvariant());
-                    if (sp.vs != null)
-                    {
-                        sp.vs.MapColour = mapColorDialog.Color.ToArgb();
-                        sp.vs.Update();
-                    }
-                }
-                this.Cursor = Cursors.Default;
-            }
-        }
+                UserControlLog uclog = new UserControlLog(); // Add a log
+                tcf.AddUserControl(uclog);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlLog));
 
-        public void setDefaultMapColour()
-        {
-            mapColorDialog.Color = Color.FromArgb(defaultColour);
-            if (mapColorDialog.ShowDialog(this) == DialogResult.OK)
+                tcf.Init("Log " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "Log" + numopened);
+                uclog.Init(_discoveryForm, numopened);
+                uclog.AppendText(_discoveryForm.LogText, _discoveryForm.theme.TextBackColor);
+            }
+            else if (selected == PopOuts.NS)
             {
-                defaultColour = mapColorDialog.Color.ToArgb();
-                var db = new SQLiteDBClass();
-                db.PutSettingInt("DefaultMap", defaultColour);
+                UserControlStarDistance ucsd = new UserControlStarDistance(); // Add a closest distance tab
+
+                tcf.AddUserControl(ucsd);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlStarDistance));
+
+                tcf.Init("Nearest Stars " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "StarDistance" + numopened);
+
+                ucsd.Init(_discoveryForm, numopened);
+                if (lastclosestsystems != null)           // if we have some, fill in this grid
+                    ucsd.FillGrid(lastclosestname, lastclosestsystems);
+            }
+            else if (selected == PopOuts.Materials)
+            {
+                UserControlMaterials ucmc = new UserControlMaterials(); // Add a closest distance tab
+                tcf.AddUserControl(ucmc);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlMaterials));
+
+                tcf.Init("Materials " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "Materials" + numopened);
+
+                ucmc.Init(_discoveryForm, numopened);
+                HistoryEntry curpos = userControlTravelGrid.GetCurrentHistoryEntry;
+                if (curpos != null)
+                    ucmc.Display(curpos.MaterialCommodity.Sort(false));
+            }
+            else if (selected == PopOuts.Commodities)
+            {
+                UserControlCommodities ucmc = new UserControlCommodities(); // Add a closest distance tab
+                tcf.AddUserControl(ucmc);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlCommodities));
+
+                tcf.Init("Commodities " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "Commodities" + numopened);
+
+                ucmc.Init(_discoveryForm, numopened);
+                HistoryEntry curpos = userControlTravelGrid.GetCurrentHistoryEntry;
+                if (curpos != null)
+                    ucmc.Display(curpos.MaterialCommodity.Sort(true));
+            }
+            else if (selected == PopOuts.Ledger)
+            {
+                UserControlLedger ucmc = new UserControlLedger(); // Add a closest distance tab
+                tcf.AddUserControl(ucmc);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlLedger));
+
+                tcf.Init("Ledger " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "Ledger" + numopened);
+
+                ucmc.Init(_discoveryForm, numopened);
+                ucmc.Display(_discoveryForm.history.materialcommodititiesledger);
+                ucmc.OnGotoJID += GotoJID;
+            }
+            else if (selected == PopOuts.Journal)
+            {
+                UserControlJournalGrid uctg = new UserControlJournalGrid();
+                tcf.AddUserControl(uctg);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlJournalGrid));  // used to determine name and also key for DB
+
+                tcf.Init("Journal History " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "JournalHistory" + numopened);
+                uctg.Init(_discoveryForm, numopened);
+                uctg.Display(_discoveryForm.history);
+                uctg.NoPopOutIcon();
+                uctg.NoHistoryIcon();
+            }
+            else if (selected == PopOuts.TravelGrid)    // match order in bitmap mp and comboBoxCustomPopOut
+            {
+                UserControlTravelGrid uctg = new UserControlTravelGrid();
+                tcf.AddUserControl(uctg);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlTravelGrid));  // used to determine name and also key for DB
+                tcf.Init("Travel History " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "TravelHistory" + numopened);
+                uctg.Init(_discoveryForm, numopened);
+                uctg.Display(_discoveryForm.history);
+                uctg.NoPopOutIcon();
+                uctg.NoHistoryIcon();
+            }
+            else if (selected == PopOuts.ScreenShot)    // match order in bitmap mp and comboBoxCustomPopOut
+            {
+                UserControlScreenshot ucm = new UserControlScreenshot();
+                tcf.AddUserControl(ucm);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlScreenshot));  // used to determine name and also key for DB
+                tcf.Init("ScreenShot " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "ScreenShot" + numopened);
+                ucm.Init(_discoveryForm, numopened);
+            }
+            else if (selected == PopOuts.Statistics)    // match order in bitmap mp and comboBoxCustomPopOut
+            {
+                UserControlStats ucm = new UserControlStats();
+                tcf.AddUserControl(ucm);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlStats));  // used to determine name and also key for DB
+                tcf.Init("Statistics " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "Stats" + numopened);
+                ucm.Init(_discoveryForm, numopened);
+                ucm.SelectionChanged(userControlTravelGrid.GetCurrentHistoryEntry, _discoveryForm.history);
+            }
+            else if (selected == PopOuts.Scan)
+            {
+                UserControlScan ucm = new UserControlScan();
+                tcf.AddUserControl(ucm);
+                int numopened = usercontrolsforms.CountOf(typeof(UserControlStats));  // used to determine name and also key for DB
+                tcf.Init("Scan " + ((numopened > 1) ? numopened.ToString() : ""), _discoveryForm.theme.WindowsFrame, _discoveryForm.TopMost, "Scan" + numopened);
+                ucm.Init(_discoveryForm, numopened);
+                ucm.Display(userControlTravelGrid.GetCurrentHistoryEntry, _discoveryForm.history);
+            }
+
+            tcf.Show();
+
+            if ( tcf.UserControl != null )
+                tcf.UserControl.Font = _discoveryForm.theme.GetFont;        // Important. Apply font autoscaling to the user control
+                                                                        // ApplyToForm does not apply the font to the actual UC, only
+                                                                        // specific children controls.  The TabControl in the discoveryform ends up autoscaling most stuff
+                                                                        // the children directly attached to the discoveryform are not autoscaled
+
+            _discoveryForm.theme.ApplyToForm(tcf);
+        }
+
+        #endregion
+
+        #region Target System
+
+        public void RefreshTargetInfo()
+        {
+            string name;
+            double x, y, z;
+
+            if (TargetClass.GetTargetPosition(out name, out x, out y, out z))
+            {
+                textBoxTarget.Text = name;
+                textBoxTargetDist.Text = "No Pos";
+
+                HistoryEntry cs = _discoveryForm.history.GetLastWithPosition;
+                if ( cs != null )
+                    textBoxTargetDist.Text = SystemClass.Distance(cs.System, x, y, z).ToString("0.00");
+
+                toolTipEddb.SetToolTip(textBoxTarget, "Position is " + x.ToString("0.00") + "," + y.ToString("0.00") + "," + z.ToString("0.00"));
+            }
+            else
+            {
+                textBoxTarget.Text = "Set target";
+                textBoxTargetDist.Text = "";
+                toolTipEddb.SetToolTip(textBoxTarget, "On 3D Map right click to make a bookmark, region mark or click on a notemark and then tick on Set Target, or type it here and hit enter");
+            }
+
+            if (IsSummaryPopOutReady)
+                summaryPopOut.RefreshTarget(userControlTravelGrid.TravelGrid, _discoveryForm.history.GetLastWithPosition);
+
+            if (IsTripPanelPopOutReady)
+                tripPanelPopOut.displayLastFSD(_discoveryForm.history.GetLastFSD);
+        }
+
+#endregion
+
+#region Summary Pop out
+        
+        public bool IsSummaryPopOutReady { get { return summaryPopOut != null && !summaryPopOut.IsFormClosed; } }
+
+        public bool ToggleSummaryPopOut()
+        {
+            if (summaryPopOut == null || summaryPopOut.IsFormClosed)
+            {
+                SummaryPopOut p = new SummaryPopOut();
+                p.RequiresRefresh += SummaryRefreshRequested;
+                p.SetGripperColour(_discoveryForm.theme.LabelColor);
+                p.SetTextColour(_discoveryForm.theme.SPanelColor);
+                p.ResetForm(userControlTravelGrid.TravelGrid);
+                p.RefreshTarget(userControlTravelGrid.TravelGrid, _discoveryForm.history.GetLastWithPosition); 
+                p.Show();
+                summaryPopOut = p;          // do it like this in case of race conditions 
+                return true;
+            }
+            else
+            { 
+                summaryPopOut.Close();      // there is no point null it, as if the user closes it, it never gets the chance to be nulled
+                return false;
             }
         }
 
+        public void RedrawSummary()
+        {
+            if (IsSummaryPopOutReady)
+            {
+                summaryPopOut.ResetForm(userControlTravelGrid.TravelGrid);
+                summaryPopOut.RefreshTarget(userControlTravelGrid.TravelGrid, _discoveryForm.history.GetLastWithPosition);
+            }
+        }
+
+        public void SummaryRefreshRequested(Object o, EventArgs e)
+        {
+            RedrawSummary();
+        }
+
+        public void RefreshSummaryRow(DataGridViewRow row , bool add = false )
+        {
+            if (IsSummaryPopOutReady)
+                summaryPopOut.RefreshRow(userControlTravelGrid.TravelGrid, row, add);
+        }
+
+        public void NewBodyScan(JournalScan js)
+        {
+            if (IsSummaryPopOutReady)
+                summaryPopOut.ShowScanData(js);
+        }
+
+        void TGPopOut()
+        {
+            PopOut(PopOuts.TravelGrid);
+        }
+
+        #endregion
+
+        #region LogOut
+
+
+        #endregion
+
+
+        #region Trip computer Pop out
+
+        TripPanelPopOut tripPanelPopOut = null;
+
+        public bool IsTripPanelPopOutReady { get { return tripPanelPopOut != null && !tripPanelPopOut.IsFormClosed; } }
+
+        public bool ToggleTripPanelPopOut()
+        {
+            if (tripPanelPopOut == null || tripPanelPopOut.IsFormClosed)
+            {
+                TripPanelPopOut p = new TripPanelPopOut(_discoveryForm);
+                p.SetGripperColour(_discoveryForm.theme.LabelColor);
+                p.SetTextColour(_discoveryForm.theme.SPanelColor);
+                p.displayLastFSD(_discoveryForm.history.GetLastFSD);
+                p.Show();
+                tripPanelPopOut = p;          // do it like this in case of race conditions 
+                return true;
+            }
+            else
+            {
+                tripPanelPopOut.Close();      // there is no point null it, as if the user closes it, it never gets the chance to be nulled
+                return false;
+            }
+        }
+
+        void RedrawTripPanel(HistoryList hl)
+        {
+            if (IsTripPanelPopOutReady)
+            {
+                
+                tripPanelPopOut.displayLastFSD(hl.GetLastFSD);
+            }
+        }
+    
+        #endregion
     }
-
-
-
-    public class SystemDist
-    {
-        public string name;
-        public double dist;
-    }
-
-
-
-
 }

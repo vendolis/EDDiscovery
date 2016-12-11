@@ -9,7 +9,6 @@ using System.IO;
 using EDDiscovery.DB;
 using Newtonsoft.Json.Linq;
 
-
 namespace EDDiscovery2
 {
     public enum EDGovernment
@@ -98,291 +97,107 @@ namespace EDDiscovery2
 
     }
 
-    public enum EDCommodities
+
+
+    public class EliteDangerousClass
     {
-        Unknown = 0,
-Advanced_Catalysers,
-Agri__Medicines,
-Algae,
-Aluminium,
-Animal_Meat,
-Animal_Monitors,
-Aquaponic_Systems,
-Atmospheric_Processors,
-Auto__Fabricators,
-Basic_Medicines,
-Battle_Weapons,
-Bauxite,
-Beer,
-Bertrandite,
-Beryllium,
-Bioreducing_Lichen,
-Biowaste,
-Chemical_Waste,
-Clothing,
-Cobalt,
-Coffee,
-Coltan,
-Combat_Stabilisers,
-Computer_Components,
-Consumer_Technology,
-Copper,
-Crop_Harvesters,
-Domestic_Appliances,
-Explosives,
-Fish,
-Food_Cartridges,
-Fruit_and_Vegetables,
-Gallite,
-Gallium,
-Gold,
-Grain,
-H___E____Suits,
-Hydrogen_Fuel,
-Imperial_Slaves,
-Indite,
-Indium,
-Land_Enrichment_Systems,
-Leather,
-Lepidolite,
-Liquor,
-Lithium,
-Marine_Equipment,
-Microbial_Furnaces,
-Mineral_Extractors,
-Mineral_Oil,
-Narcotics,
-Natural_Fabrics,
-Non__lethal_Weapons,
-Palladium,
-Performance_Enhancers,
-Personal_Weapons,
-Pesticides,
-Platinum,
-Polymers,
-Power_Generators,
-Progenitor_Cells,
-Reactive_Armour,
-Resonating_Separators,
-Robotics,
-Rutile,
-Scrap,
-Semiconductors,
-Silver,
-Slaves,
-Superconductors,
-Synthetic_Fabrics,
-Synthetic_Meat,
-Tantalum,
-Tea,
-Terrain_Enrichment_Systems,
-Titanium,
-Tobacco,
-Toxic_Waste,
-Uraninite,
-Uranium,
-Water_Purifiers,
-Wine,
-Lucan_Onion_Head,
-Limpet,
-Wuthielo_Ku_Froth,
-Antiquities,
-Painite,
-Onion_Head,
-Trinkets_Of_Hidden_Fortune,
-    }
-
-
-
-
-    public class EliteDangerous
-    {
-        static public string EDFileName;
-        static public string EDLaunchFileName;
         static public string EDDirectory;
-        static public string EDVersion;
         static public bool EDRunning = false;
-        static public bool EDLaunchRunning = false;
-        static public bool Beta = false;
+        static public bool checkedfordefaultfolder = false;
 
         static public bool CheckED()
         {
-            Process[] processes32 = Process.GetProcessesByName("EliteDangerous32");
-            Process[] processes64 = Process.GetProcessesByName("EliteDangerous64");
-
-            Process[] processes = processes32;
-
-            if (processes == null || processes32.Length == 0)
-                processes = processes64;
-
-            if (processes == null)
-            {
-                EDRunning = false;
-            }
-            else if (processes.Length == 0 )
-            {
-                EDRunning = false;
-
-                SQLiteDBClass db = new SQLiteDBClass();
-
-                if (EDDirectory==null || EDDirectory.Equals(""))
-                    EDDirectory = db.GetSettingString("EDDirectory", "");
-            }
-            else
-            {
-                string processFilename = null;
-                try
-                {
-                    processFilename = processes[0].MainModule.FileName;
-                }
-                catch (Win32Exception)
-                {
-                }
-
-                if (processFilename != null && (EDFileName==null || !EDFileName.Equals(processes[0].MainModule.FileName)))
-                {
-                    EDFileName = processes[0].MainModule.FileName;
-                    EDDirectory = Path.GetDirectoryName(EDFileName);
-
-                    SQLiteDBClass db = new SQLiteDBClass();
-
-                    if (EDDirectory.Contains("PUBLIC_TEST_SERVER")) // BETA
-                    {
-                        db.PutSettingString("EDDirectoryBeta", EDDirectory);
-                        Beta = true;
-                    }
-                    else
-                    {
-                        Beta = false;
-                        db.PutSettingString("EDDirectory", EDDirectory);
-                    }
-                    
-                }
-
-                try
-                {
-                    EDVersion = processes[0].MainModule.FileVersionInfo.ProductVersion;
-                }
-                catch (Win32Exception)
-                {
-                }
-
-                EDRunning = true;
-
-            }
-
-            //processes = Process.GetProcessesByName("EDLaunch");
-
-            //if (processes == null)
-            //{
-            //    EDLaunchRunning = false;
-            //}
-            //else if (processes.Length == 0)
-            //{
-            //    EDLaunchRunning = false;
-            //}
-            //else
-            //{
-
-            //    EDLaunchFileName = ProcessExecutablePath(processes[0]);
-            //    EDLaunchRunning = true;
-                
-            //}
-
-            return EDRunning;
-        }
-
-
-        static public bool CheckStationLogging()
-        {
-            if (EDDirectory == null)
-                return true;
-
-            if (EDDirectory.Equals(""))
-                return true;
-
-
-            if (!Directory.Exists(EDDirectory)) // For safety.
-                return true;
+            string EDFileName = null;
 
             try
             {
+                Process[] processes32 = Process.GetProcessesByName("EliteDangerous32");
+                Process[] processes64 = Process.GetProcessesByName("EliteDangerous64");
 
+                Process[] processes = processes32;
 
-                string filename = Path.Combine(EDDirectory, "AppConfig.xml");
+                if (processes == null || processes32.Length == 0)
+                    processes = processes64;
 
-                using (Stream fs = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                if (processes == null)
                 {
-                    using (StreamReader sr = new StreamReader(fs))
+                    EDRunning = false;
+                }
+                else if (processes.Length == 0)
+                {
+                    EDRunning = false;
+
+                    if (EDDirectory == null || EDDirectory.Equals(""))
                     {
-                        string line;
-                        while ((line = sr.ReadLine()) != null)
+                        if (!checkedfordefaultfolder)
                         {
-                            line = line.Trim().Replace(" ", "");
-                            if (line.Contains("VerboseLogging=\"1\""))
-                            {
-                                return true;
-                            }
+                            checkedfordefaultfolder = true;                 // do it once, but no need to keep on doing it.. only this class can set it once the process starts
+                            EDDirectory = SQLiteDBClass.GetSettingString("EDDirectory", "");
                         }
                     }
                 }
-
-
-
-                // Check ED local filename too
-                filename = Path.Combine(EDDirectory, "AppConfigLocal.xml");
-
-                if (!File.Exists(filename))
+                else
                 {
+                    string processFilename = null;
                     try
                     {
-                        using (StreamWriter writer = new StreamWriter(filename))
-                        {
-                            writer.WriteLine("<AppConfig>");
-                            writer.WriteLine(" <Network");
-                            writer.WriteLine("  VerboseLogging=\"1\">");
-                            writer.WriteLine(" </Network>");
-                            writer.WriteLine("</AppConfig>");
-                        }
+                        int id = processes[0].Id;
+                        processFilename = GetMainModuleFilepath(id);        // may return null if id not found (seen this)
+
+                        if (processFilename != null)
+                            EDFileName = processFilename;
                     }
-                    catch (Exception ex)
+                    catch (Win32Exception)
                     {
-                        System.Diagnostics.Trace.WriteLine("CheckStationLogging exception: " + ex.Message);
+                    }
+
+                    if (EDFileName != null)                                 // if found..
+                    {
+                        string newfolder = Path.GetDirectoryName(EDFileName);
+
+                        if ( newfolder != null && !newfolder.Equals(EDDirectory) )
+                        {
+                            EDDirectory = newfolder;
+                            SQLiteDBClass.PutSettingString("EDDirectory", EDDirectory);
+                        }
+
+                        EDRunning = true;
                     }
                 }
 
+                return EDRunning;
+            }
+            catch (Exception)
+            {
+            }
+            return false;
+        }
 
-                if (File.Exists(filename))
+        private static  string GetMainModuleFilepath(int processId)
+        {
+            string wmiQueryString = "SELECT ProcessId, ExecutablePath FROM Win32_Process WHERE ProcessId = " + processId;
+
+            using (var searcher = new ManagementObjectSearcher(wmiQueryString))
+            {
+                if (searcher != null)           // seen it return null
                 {
-                    using (Stream fs = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var results = searcher.Get())
                     {
-                        using (StreamReader sr = new StreamReader(fs))
+                        if (results != null)
                         {
-                            string line;
-                            while ((line = sr.ReadLine()) != null)
+                            foreach (ManagementObject mo in results)
                             {
-                                line = line.Trim().Replace(" ", "");
-                                if (line.Contains("VerboseLogging=\"1\""))
+                                if (mo != null)
                                 {
-                                    return true;
+                                    return (string)mo["ExecutablePath"];
                                 }
                             }
                         }
                     }
                 }
-
-
-                return false;
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Trace.WriteLine("Exception " + ex.Message);
-                System.Diagnostics.Trace.WriteLine(ex.StackTrace);
-                return false;
-            }
+            return null;
         }
-
-
 
 
         static private string ProcessExecutablePath(Process process)
@@ -569,41 +384,6 @@ Trinkets_Of_Hidden_Fortune,
             }
             return economies;
         }
-
-
-
-
-        static public EDCommodities String2Commodity(string str)
-        {
-            foreach (var govid in Enum.GetValues(typeof(EDCommodities)))
-            {
-                if (str.Equals(govid.ToString().Replace("___", ".").Replace("__", "-").Replace("_", " ")))
-                    return (EDCommodities)govid;
-                //System.Console.WriteLine(govid.ToString());
-            }
-
-            System.Diagnostics.Trace.WriteLine("Unknown commodity: " + str);
-            return EDCommodities.Unknown;
-        }
-
-        static public List<EDCommodities> EDCommodities2ID(JArray ja)
-        {
-            List<EDCommodities> commodity = new List<EDCommodities>();
-
-            if (ja == null)
-                return null;
-
-            for (int ii = 0; ii < ja.Count; ii++)
-            {
-                string ecstr = ja[ii].Value<string>();
-                commodity.Add(String2Commodity(ecstr));
-
-            }
-            return commodity;
-        }
-
-       
-
 
 
 

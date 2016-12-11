@@ -7,12 +7,14 @@
     <ProjectGuid>{6EE10D92-E3E4-44D9-8E6B-851801B0B510}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>EDDiscovery2</RootNamespace>
-    <AssemblyName>EDDiscovery2</AssemblyName>
-    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <RootNamespace>EDDiscovery</RootNamespace>
+    <AssemblyName>EDDiscovery</AssemblyName>
+    <TargetFrameworkVersion>v4.6</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
     <IsWebBootstrapper>true</IsWebBootstrapper>
+    <NuGetPackageImportStamp>
+    </NuGetPackageImportStamp>
     <PublishUrl>ftp://robert.astronet.se/homepage/Elite/EDDiscovery2/</PublishUrl>
     <Install>true</Install>
     <InstallFrom>Web</InstallFrom>
@@ -27,13 +29,13 @@
     <CreateWebPageOnPublish>true</CreateWebPageOnPublish>
     <WebPage>publish.htm</WebPage>
     <ApplicationRevision>0</ApplicationRevision>
-    <ApplicationVersion>2.5.9.0</ApplicationVersion>
+    <ApplicationVersion>2.7.6.0</ApplicationVersion>
     <UseApplicationTrust>false</UseApplicationTrust>
     <PublishWizardCompleted>true</PublishWizardCompleted>
     <BootstrapperEnabled>true</BootstrapperEnabled>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <PlatformTarget>x86</PlatformTarget>
+    <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
@@ -42,15 +44,19 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <RunCodeAnalysis>false</RunCodeAnalysis>
+    <UseVSHostingProcess>false</UseVSHostingProcess>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <PlatformTarget>x86</PlatformTarget>
+    <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <OutputPath>bin\Release\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <UseVSHostingProcess>false</UseVSHostingProcess>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup>
     <ManifestCertificateThumbprint>6586052CF2C6A2D8348CC25AA17842FA028AED2F</ManifestCertificateThumbprint>
@@ -65,33 +71,84 @@
     <SignManifests>false</SignManifests>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>fge-logo-001-dark.ico</ApplicationIcon>
+    <ApplicationIcon>edlogo_3mo_icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup>
+    <StartupObject>
+    </StartupObject>
+  </PropertyGroup>
+  <PropertyGroup>
+    <NoWin32Manifest>true</NoWin32Manifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
+    <DebugSymbols>true</DebugSymbols>
+    <OutputPath>bin\x64\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <DebugType>full</DebugType>
+    <PlatformTarget>x64</PlatformTarget>
+    <ErrorReport>prompt</ErrorReport>
+    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
+    <OutputPath>bin\x64\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <Optimize>true</Optimize>
+    <DebugType>pdbonly</DebugType>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseVSHostingProcess>false</UseVSHostingProcess>
+    <ErrorReport>prompt</ErrorReport>
+    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
+    <DebugSymbols>true</DebugSymbols>
+    <OutputPath>bin\x86\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <DebugType>full</DebugType>
+    <PlatformTarget>x86</PlatformTarget>
+    <ErrorReport>prompt</ErrorReport>
+    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x86'">
+    <OutputPath>bin\x86\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <Optimize>true</Optimize>
+    <DebugType>pdbonly</DebugType>
+    <PlatformTarget>x86</PlatformTarget>
+    <UseVSHostingProcess>false</UseVSHostingProcess>
+    <ErrorReport>prompt</ErrorReport>
+    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Newtonsoft.Json, Version=6.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\Newtonsoft.Json.6.0.8\lib\net40\Newtonsoft.Json.dll</HintPath>
-    </Reference>
-    <Reference Include="Noesis.Javascript, Version=0.0.0.0, Culture=neutral, processorArchitecture=x86" Condition="'$(PlatformTarget)' == 'x86'">
-      <HintPath>..\packages\Noesis.Javascript.0.7.1.0\lib\net40\x86\Noesis.Javascript.dll</HintPath>
+    <Reference Include="Newtonsoft.Json, Version=9.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>..\packages\Newtonsoft.Json.9.0.1\lib\net45\Newtonsoft.Json.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="OpenTK">
-      <HintPath>..\packages\OpenTK.1.1.1589.5942\lib\NET40\OpenTK.dll</HintPath>
+    <Reference Include="OpenTK, Version=2.0.0.0, Culture=neutral, PublicKeyToken=bad199fe84eb3df4, processorArchitecture=MSIL">
+      <HintPath>..\packages\OpenTK.2.0.0\lib\net20\OpenTK.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="OpenTK.GLControl">
       <HintPath>..\packages\OpenTK.GLControl.1.1.1589.5942\lib\NET40\OpenTK.GLControl.dll</HintPath>
     </Reference>
     <Reference Include="System" />
+    <Reference Include="System.configuration" />
     <Reference Include="System.Core" />
-    <Reference Include="System.Data.SQLite">
-      <HintPath>.\System.Data.SQLite.dll</HintPath>
+    <Reference Include="System.Data.SQLite, Version=1.0.103.0, Culture=neutral, PublicKeyToken=db937bc2d44ff139, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Data.SQLite.Core.1.0.103\lib\net46\System.Data.SQLite.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="System.Data.SQLite.Linq">
-      <HintPath>.\System.Data.SQLite.Linq.dll</HintPath>
+    <Reference Include="System.Data.SQLite.Linq, Version=1.0.103.0, Culture=neutral, PublicKeyToken=db937bc2d44ff139, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Data.SQLite.Linq.1.0.103\lib\net46\System.Data.SQLite.Linq.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System.Management" />
+    <Reference Include="System.Net.Http" />
     <Reference Include="System.Web" />
+    <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Windows.Forms.DataVisualization" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions">
@@ -106,11 +163,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="2DMap\FGEImage.cs" />
-    <Compile Include="2DMap\FormSagCarinaMission.cs">
+    <Compile Include="2DMap\Form2DMap.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="2DMap\FormSagCarinaMission.Designer.cs">
-      <DependentUpon>FormSagCarinaMission.cs</DependentUpon>
+    <Compile Include="2DMap\Form2DMap.Designer.cs">
+      <DependentUpon>Form2DMap.cs</DependentUpon>
     </Compile>
     <Compile Include="2DMap\ImageViewer.cs">
       <SubType>Component</SubType>
@@ -118,16 +175,357 @@
     <Compile Include="2DMap\ImageViewer.Designer.cs">
       <DependentUpon>ImageViewer.cs</DependentUpon>
     </Compile>
+    <Compile Include="3DMap\CameraDirectionMovement.cs" />
+    <Compile Include="3DMap\PositionDirection.cs" />
+    <Compile Include="3DMap\MapRecorder.cs" />
+    <Compile Include="3DMap\Polygon.cs" />
     <Compile Include="3DMap\Data3DSetClass.cs" />
-    <Compile Include="DB\StationClass.cs" />
+    <Compile Include="3DMap\DatasetBuilder.cs" />
+    <Compile Include="3DMap\MapManager.cs" />
+    <Compile Include="3DMap\KeyboardActions.cs" />
+    <Compile Include="3DMap\StarGrid.cs" />
+    <Compile Include="3DMap\StarNamesList.cs" />
+    <Compile Include="3DMap\Zoom.cs" />
+    <Compile Include="Controls\CheckedListControlCustom.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Controls\ControlHelpers.cs" />
+    <Compile Include="Controls\DataGridViewExtensions.cs" />
+    <Compile Include="Controls\AutoCompleteTextBox.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\LabelExt.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\PanelVScroll.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\PictureBoxHotspot.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\TabStrip.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\TabStrip.Designer.cs">
+      <DependentUpon>TabStrip.cs</DependentUpon>
+    </Compile>
+    <Compile Include="DB\BookmarkClass.cs" />
+    <Compile Include="DB\MaterialCommodities.cs" />
+    <Compile Include="DB\RegisterEntry.cs" />
+    <Compile Include="DB\SQLiteCommandED.cs" />
+    <Compile Include="DB\SQLiteConnectionED.cs" />
+    <Compile Include="DB\SqLiteDBSchema.cs" />
+    <Compile Include="DB\SQLiteConnectionSystem.cs" />
+    <Compile Include="DB\SQLiteConnectionUser.cs" />
+    <Compile Include="DB\TargetClass.cs" />
+    <Compile Include="DistanceParser.cs" />
+    <Compile Include="Controls\SplitContainerCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="EDDN\EDDNClass.cs" />
+    <Compile Include="EDDN\EDDNSync.cs" />
+    <Compile Include="EDSM\GalacticMapObject.cs" />
+    <Compile Include="EDSM\GalacticMapping.cs" />
+    <Compile Include="EDSM\GalMapType.cs" />
+    <Compile Include="EliteDangerous\Bodies.cs" />
+    <Compile Include="EliteDangerous\EDJournalClass.cs" />
+    <Compile Include="EliteDangerous\EDJournalReader.cs" />
+    <Compile Include="EliteDangerous\JournalEntry.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalApproachSettlement.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalBounty.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalBuyAmmo.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalBuyDrones.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalBuyExplorationData.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalBuyTradeData.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCapShipBond.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalClearSavedGame.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCockpitBreached.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCollectCargo.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCommitCrime.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCommunityGoalDiscard.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCommunityGoalJoin.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCommunityGoalReward.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalContinued.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCrewAssign.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCrewFire.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalCrewHire.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDatalinkScan.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDatalinkVoucher.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDataScanned.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDied.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDocked.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDockFighter.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDockingCancelled.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDockingDenied.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDockingGranted.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDockingRequested.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDockingTimeout.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalDockSRV.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalEDDItemSet.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalEjectCargo.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalEngineerApply.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalEngineerCraft.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalEngineerProgress.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalEscapeInterdiction.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalFactionKillBond.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalFetchRemoteModule.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalFileheader.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalFuelScope.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalHeatDamage.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalHeatWarning.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalHullDamage.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalInterdicted.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalInterdiction.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalJetConeBoost.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalJetConeDamage.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalLaunchFighter.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalLaunchSRV.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalLiftoff.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalLocOrJump.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalLocation.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalFSDJump.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalLoadGame.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMarketBuy.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMarketSell.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMassModuleStore.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMaterialCollected.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMaterialDiscarded.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMaterialDiscovered.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMiningRefined.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMissionAbandoned.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMissionAccepted.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMissionCompleted.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalMissionFailed.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalModuleBuy.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalModuleRetrieve.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalModuleSell.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalModuleSellRemote.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalModuleStore.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalModuleSwap.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalNewCommander.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPayFines.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPayLegacyFines.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplayCollect.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplayDefect.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplayDeliver.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplayFastTrack.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplayJoin.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplayLeave.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplaySalary.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplayVote.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPowerplayVoucher.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalProgress.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPromotion.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalPVPKill.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalRank.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalRebootRepair.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalReceiveText.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalRedeemVoucher.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalRefuelAll.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalRefuelPartial.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalRepair.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalRepairAll.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalRestockVehicle.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalResurrect.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalScan.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalScientificResearch.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalScreenshot.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalSelfDestruct.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalSellDrones.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalSellExplorationData.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalSendText.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalShieldState.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalShipyardBuy.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalShipyardNew.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalShipyardSell.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalShipyardSwap.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalShipyardTransfer.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalSupercruiseEntry.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalSupercruiseExit.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalSynthesis.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalTouchdown.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalUndocked.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalUnhandled.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalUnknown.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalUSSDrop.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalVehicleSwitch.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalWingAdd.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalWingJoin.cs" />
+    <Compile Include="EliteDangerous\JournalEvents\JournalWingLeave.cs" />
+    <Compile Include="EliteDangerous\Material.cs" />
+    <Compile Include="EliteDangerous\StarScan.cs" />
+    <Compile Include="EliteDangerous\Synthesis.cs" />
+    <Compile Include="Export\ExportFilteredSystems.cs" />
+    <Compile Include="Forms\FindMaterialsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\FindMaterialsForm.Designer.cs">
+      <DependentUpon>FindMaterialsForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\TripPanelPopOut.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\TripPanelPopOut.Designer.cs">
+      <DependentUpon>TripPanelPopOut.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\JSONFiltersForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\JSONFiltersForm.Designer.cs">
+      <DependentUpon>JSONFiltersForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\TextBoxEntry.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\TextBoxEntry.Designer.cs">
+      <DependentUpon>TextBoxEntry.cs</DependentUpon>
+    </Compile>
+    <Compile Include="JSON\JSONFilter.cs" />
+    <Compile Include="JSON\JSONPrettyPrint.cs" />
+    <Compile Include="EliteDangerous\LogReaderBase.cs" />
+    <Compile Include="EliteDangerous\NetLogReader.cs" />
+    <Compile Include="Export\ExportBase.cs" />
+    <Compile Include="Export\ExportControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Export\ExportControl.Designer.cs">
+      <DependentUpon>ExportControl.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Export\ExportFSDJump.cs" />
+    <Compile Include="Export\ExportScan.cs" />
+    <Compile Include="Forms\AssignTravelLogSystemForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\AssignTravelLogSystemForm.Designer.cs">
+      <DependentUpon>AssignTravelLogSystemForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\BookmarkForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\BookmarkForm.Designer.cs">
+      <DependentUpon>BookmarkForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\NewReleaseForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\NewReleaseForm.Designer.cs">
+      <DependentUpon>NewReleaseForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\SplashForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\SplashForm.Designer.cs">
+      <DependentUpon>SplashForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\TabControlForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\TabControlForm.Designer.cs">
+      <DependentUpon>TabControlForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\TimedMessage.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\TimedMessage.Designer.cs">
+      <DependentUpon>TimedMessage.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\InfoForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\InfoForm.Designer.cs">
+      <DependentUpon>InfoForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\RecordStep.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\RecordStep.Designer.cs">
+      <DependentUpon>RecordStep.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\SummaryPopOut.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\SummaryPopOut.Designer.cs">
+      <DependentUpon>SummaryPopOut.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\UserControlForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\UserControlForm.Designer.cs">
+      <DependentUpon>UserControlForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="HistoryList.cs" />
+    <Compile Include="HTTP\DownloadFile.cs" />
+    <Compile Include="HTTP\GitHubClass.cs" />
+    <Compile Include="HTTP\GitHubRelease.cs" />
+    <Compile Include="JSON\JSONHelper.cs" />
+    <Compile Include="ObjectExtensions.cs" />
+    <Compile Include="Controls\ButtonExt.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\CheckBoxCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\CustomColourTable.cs" />
+    <Compile Include="Controls\StatusStripCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\DataViewScrollerPanel.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\GroupBoxCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\NumericUpDownCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\RadioButtonCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\RichTextBoxScroll.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\TabControlCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\TabStyleCustom.cs" />
+    <Compile Include="Controls\DrawnPanel.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\ComboBoxCustom.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Controls\ListControlCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\RichTextBoxBorder.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\TextBoxBorder.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\ToolStripComboBoxCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\UpDown.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\VScrollCustom.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="DB\SavedRouteClass.cs" />
+    <Compile Include="DB\ISystem.cs" />
+    <Compile Include="DB\InMemory\SystemClass.cs" />
+    <Compile Include="DB\IVisitedSystems.cs" />
     <Compile Include="DB\TravelLogUnit.cs" />
-    <Compile Include="DB\VisitedSystemsClass.cs" />
-    <Compile Include="EDDB\EDDBClass.cs" />
+    <Compile Include="DB\WantedSystemClass.cs" />
     <Compile Include="EDDConfig.cs" />
     <Compile Include="EDDiscoveryServer\EDDiscoveryServer.cs" />
+    <Compile Include="EDDTheme.cs" />
+    <Compile Include="EDDToolStripRenderer.cs" />
     <Compile Include="EDSM\EDSMClass.cs" />
     <Compile Include="EDSM\EDSMSync.cs" />
     <Compile Include="EliteDangerous\AppConfig.cs" />
+    <Compile Include="EliteDangerous\EDCommander.cs" />
     <Compile Include="EliteDangerous\EliteDangerous.cs" />
     <Compile Include="EliteDangerous\GameSettings.cs" />
     <Compile Include="3DMap\FormMap.cs">
@@ -136,12 +534,31 @@
     <Compile Include="3DMap\FormMap.Designer.cs">
       <DependentUpon>FormMap.cs</DependentUpon>
     </Compile>
-    <Compile Include="3DMap\OpenTKTest.cs" />
     <Compile Include="DataGridViewSorter.cs" />
-    <Compile Include="DB\DistanceClass.cs" />
     <Compile Include="DB\SQLiteDBClass.cs" />
     <Compile Include="DB\SystemClass.cs" />
     <Compile Include="DB\SystemNoteClass.cs" />
+    <Compile Include="Forms\AboutForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\AboutForm.Designer.cs">
+      <DependentUpon>AboutForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\ThemeEditor.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\ThemeEditor.Designer.cs">
+      <DependentUpon>ThemeEditor.cs</DependentUpon>
+    </Compile>
+    <Compile Include="HTTP\EDMaterializerCom.cs" />
+    <Compile Include="HTTP\HttpCom.cs" />
+    <Compile Include="HTTP\ResponseData.cs" />
+    <Compile Include="Forms\MoveToCommander.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\MoveToCommander.Designer.cs">
+      <DependentUpon>MoveToCommander.cs</DependentUpon>
+    </Compile>
     <Compile Include="EMK\Arc.cs" />
     <Compile Include="EMK\AStar.cs" />
     <Compile Include="EMK\Graph.cs" />
@@ -157,10 +574,10 @@
       <DependentUpon>EDDiscoveryForm.cs</DependentUpon>
     </Compile>
     <Compile Include="EliteDangerous\NetLogClass.cs" />
-    <Compile Include="ImageHandler\ImageHandler.cs">
+    <Compile Include="ImageHandler.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="ImageHandler\ImageHandler.Designer.cs">
+    <Compile Include="ImageHandler.Designer.cs">
       <DependentUpon>ImageHandler.cs</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
@@ -171,18 +588,22 @@
     <Compile Include="RouteControl.Designer.cs">
       <DependentUpon>RouteControl.cs</DependentUpon>
     </Compile>
-    <Compile Include="StatsForm.cs">
+    <Compile Include="SavedRouteExpeditionControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="SavedRouteExpeditionControl.Designer.cs">
+      <DependentUpon>SavedRouteExpeditionControl.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Settings.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Settings.Designer.cs">
+      <DependentUpon>Settings.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\SystemViewForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="StatsForm.Designer.cs">
-      <DependentUpon>StatsForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="SystemData.cs" />
-    <Compile Include="SystemPosition.cs" />
-    <Compile Include="SystemViewForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="SystemViewForm.Designer.cs">
+    <Compile Include="Forms\SystemViewForm.Designer.cs">
       <DependentUpon>SystemViewForm.cs</DependentUpon>
     </Compile>
     <Compile Include="Tools.cs" />
@@ -192,27 +613,350 @@
     <Compile Include="TravelHistoryControl.Designer.cs">
       <DependentUpon>TravelHistoryControl.cs</DependentUpon>
     </Compile>
-    <Compile Include="Trilateration\ReferencesSector.cs" />
-    <Compile Include="Trilateration\ReferenceSystem.cs" />
-    <Compile Include="Trilateration\SuggestedReferences.cs" />
-    <Compile Include="Trilateration\Trilateration.cs" />
+    <Compile Include="TravelHistoryFilter.cs" />
     <Compile Include="Trilateration\TrilaterationControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="Trilateration\TrilaterationControl.Designer.cs">
       <DependentUpon>TrilaterationControl.cs</DependentUpon>
     </Compile>
+    <Compile Include="JournalViewControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="JournalViewControl.Designer.cs">
+      <DependentUpon>JournalViewControl.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlScan.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlScan.Designer.cs">
+      <DependentUpon>UserControlScan.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlStats.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlStats.Designer.cs">
+      <DependentUpon>UserControlStats.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlScreenshot.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlScreenshot.Designer.cs">
+      <DependentUpon>UserControlScreenshot.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlCommonBase.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlJournalGrid.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlJournalGrid.Designer.cs">
+      <DependentUpon>UserControlJournalGrid.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlLog.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlLog.Designer.cs">
+      <DependentUpon>UserControlLog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlLedger.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlLedger.Designer.cs">
+      <DependentUpon>UserControlLedger.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlMaterialCommodities.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlMaterialCommodities.Designer.cs">
+      <DependentUpon>UserControlMaterialCommodities.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlStarDistance.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlStarDistance.Designer.cs">
+      <DependentUpon>UserControlStarDistance.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlTravelGrid.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlTravelGrid.Designer.cs">
+      <DependentUpon>UserControlTravelGrid.cs</DependentUpon>
+    </Compile>
     <Content Include="AppConfigLocal.xml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <SubType>Designer</SubType>
     </Content>
+    <Content Include="edlogo_3mo_icon.ico" />
     <Content Include="fround.js">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <EmbeddedResource Include="Controls\RichTextBoxScroll.resx">
+      <DependentUpon>RichTextBoxScroll.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Controls\TabStrip.resx">
+      <DependentUpon>TabStrip.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\FindMaterialsForm.resx">
+      <DependentUpon>FindMaterialsForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\TripPanelPopOut.resx">
+      <DependentUpon>TripPanelPopOut.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\JSONFiltersForm.resx">
+      <DependentUpon>JSONFiltersForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\TabControlForm.resx">
+      <DependentUpon>TabControlForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\TextBoxEntry.resx">
+      <DependentUpon>TextBoxEntry.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\UserControlForm.resx">
+      <DependentUpon>UserControlForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlJournalGrid.resx">
+      <DependentUpon>UserControlJournalGrid.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlLog.resx">
+      <DependentUpon>UserControlLog.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlLedger.resx">
+      <DependentUpon>UserControlLedger.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlMaterialCommodities.resx">
+      <DependentUpon>UserControlMaterialCommodities.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlScan.resx">
+      <DependentUpon>UserControlScan.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlScreenshot.resx">
+      <DependentUpon>UserControlScreenshot.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlStarDistance.resx">
+      <DependentUpon>UserControlStarDistance.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlStats.resx">
+      <DependentUpon>UserControlStats.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlTravelGrid.resx">
+      <DependentUpon>UserControlTravelGrid.cs</DependentUpon>
+    </EmbeddedResource>
+    <None Include="App.Portable.config" />
+    <None Include="OpenTK.dll.config" />
+    <None Include="Resources\promotion.pspimage" />
+    <None Include="Resources\shipyardnew.pspimage" />
+    <None Include="Resources\YellowDot.png" />
+    <None Include="Resources\OrangeDot.png" />
+    <None Include="Resources\3dmaphelp.txt" />
+    <None Include="Resources\comet.PNG" />
+    <None Include="Resources\ExplorationHazard.png" />
+    <None Include="Resources\Blackhole.PNG" />
+    <None Include="Resources\bookmarkbrightred.png" />
+    <None Include="Resources\bookmarkgreen.png" />
+    <None Include="Resources\bookmarktarget.png" />
+    <None Include="Resources\bookmarkyellow.png" />
+    <None Include="Resources\floppy.png" />
+    <None Include="Resources\eye.png" />
+    <None Include="Resources\goto.png" />
+    <None Include="Resources\ImageTravel.png" />
+    <None Include="Resources\ImageStarDisc.png" />
+    <None Include="Resources\ImageStarDiscWhite.png" />
+    <None Include="Resources\hyperspace.png" />
+    <None Include="Resources\event.png" />
+    <None Include="Resources\Coffinicon.png" />
+    <None Include="Resources\damage.png" />
+    <None Include="Resources\heatdamage.png" />
+    <None Include="Resources\bounty.png" />
+    <None Include="Resources\commitcrime.png" />
+    <None Include="Resources\approachsettlement.png" />
+    <None Include="Resources\fighter.png" />
+    <None Include="Resources\dockingdenied.png" />
+    <None Include="Resources\ammunition.png" />
+    <None Include="Resources\dockingrequest.png" />
+    <None Include="Resources\crew.png" />
+    <None Include="Resources\engineercraft.png" />
+    <None Include="Resources\engineerprogress.png" />
+    <None Include="Resources\engineerapply.png" />
+    <None Include="Resources\dockinggranted.png" />
+    <None Include="Resources\fuelscoop.png" />
+    <None Include="Resources\buyexplorationdata.png" />
+    <None Include="Resources\dockingcancelled.png" />
+    <None Include="Resources\dockingtimeout.png" />
+    <None Include="Resources\escapeinterdiction.png" />
+    <None Include="Resources\buydrones.png" />
+    <None Include="Resources\buytradedata.png" />
+    <None Include="Resources\ejectcargo.png" />
+    <None Include="Resources\collectcargo.png" />
+    <None Include="Resources\cockpitbreached.png" />
+    <None Include="Resources\divider.png" />
+    <None Include="Resources\commodities.png" />
+    <None Include="Resources\ArrowLeft.png" />
+    <None Include="Resources\ArrowRight.png" />
+    <None Include="Resources\Class_II_Gas_Giant_Sand1.png" />
+    <None Include="Resources\Ammonia_Brown.png" />
+    <None Include="Resources\Icy_Body_Greenish1.png" />
+    <None Include="Resources\Belt.png" />
+    <None Include="Resources\Barycentre.jpg" />
+    <None Include="Resources\Barycentre.png" />
+    <None Include="Resources\DefaultStar.png" />
+    <None Include="Resources\B6V_Blueish.png" />
+    <None Include="Resources\A3V_Blueish.png" />
+    <None Include="Resources\A9III_White.png" />
+    <None Include="Resources\Ammonia_Orangeish.png" />
+    <None Include="Resources\B1V_Blue_SagittariusA.png" />
+    <None Include="Resources\Class_III_Gas_Giant_Blue3.png" />
+    <None Include="Resources\C7III.png" />
+    <None Include="Resources\Class_I_Gas_Giant_Brown2.png" />
+    <None Include="Resources\DA6VII_White.png" />
+    <None Include="Resources\Earth_Like_Standard.png" />
+    <None Include="Resources\F5VAB.png" />
+    <None Include="Resources\G1IV.png" />
+    <None Include="Resources\G8V_and_G9V.png" />
+    <None Include="Resources\Gas_giant_ammonia_based_life1.png" />
+    <None Include="Resources\Gas_giant_water_based_life_Brown3.png" />
+    <None Include="Resources\High_metal_content_world_Lava1.png" />
+    <None Include="Resources\High_metal_content_world_Mix3.png" />
+    <None Include="Resources\High_metal_content_world_Orange8.png" />
+    <None Include="Resources\Black_Hole.png" />
+    <None Include="Resources\Helium_Rich_Gas_Giant1.png" />
+    <None Include="Resources\Globe.png" />
+    <None Include="Resources\Globe_yellow.png" />
+    <Content Include="Resources\imgCheck.png" />
+    <None Include="Resources\stellaremnant.PNG" />
+    <None Include="Resources\nebula.PNG" />
+    <None Include="Resources\pulsar.PNG" />
+    <None Include="Resources\PlanetaryNebula.PNG" />
+    <None Include="Resources\starcluster.PNG" />
+    <None Include="Resources\pointofinterest.png" />
+    <None Include="Resources\selectedmarker.png" />
+    <None Include="Resources\PauseNormalRed.png" />
+    <None Include="Resources\RecordPressed.png" />
+    <None Include="Resources\StopNormalRed.png" />
+    <None Include="Resources\PlayNormal.png" />
+    <None Include="Resources\StopNormalBlue.png" />
+    <None Include="Resources\VideoRecorder.png" />
+    <None Include="Resources\pauseblue.png" />
+    <None Include="Resources\Stationenter.png" />
+    <None Include="Resources\module.png" />
+    <None Include="Resources\Stationexit.png" />
+    <None Include="Resources\scan.png" />
+    <None Include="Resources\stopflag.png" />
+    <None Include="Resources\startflag.png" />
+    <None Include="Resources\liftoff.png" />
+    <None Include="Resources\srv.png" />
+    <None Include="Resources\location.png" />
+    <None Include="Resources\materialcollected.png" />
+    <None Include="Resources\materialdiscarded.png" />
+    <None Include="Resources\materialdiscovered.png" />
+    <None Include="Resources\shields.png" />
+    <None Include="Resources\supercruiseexit.png" />
+    <None Include="Resources\mothership.png" />
+    <None Include="Resources\supercruiseenter.png" />
+    <None Include="Resources\selfdestruct.png" />
+    <None Include="Resources\ressurect.png" />
+    <None Include="Resources\refuelall.png" />
+    <None Include="Resources\repairall.png" />
+    <None Include="Resources\repair.png" />
+    <None Include="Resources\refuel.png" />
+    <None Include="Resources\moduleswap.png" />
+    <None Include="Resources\moduleretrieve.png" />
+    <None Include="Resources\modulestore.png" />
+    <None Include="Resources\modulesell.png" />
+    <None Include="Resources\modulebuy.png" />
+    <None Include="Resources\shipyardswap.png" />
+    <None Include="Resources\shipyardtransfer.png" />
+    <None Include="Resources\shipyardsell.png" />
+    <None Include="Resources\shipyardnew.png" />
+    <None Include="Resources\loadgame.png" />
+    <None Include="Resources\rank.png" />
+    <None Include="Resources\progress.png" />
+    <None Include="Resources\interdicted.png" />
+    <None Include="Resources\interdiction.png" />
+    <None Include="Resources\screenshot.png" />
+    <None Include="Resources\payfines.png" />
+    <None Include="Resources\textreceived.png" />
+    <None Include="Resources\textsent.png" />
+    <None Include="Resources\missionfailed.png" />
+    <None Include="Resources\missioncompleted.png" />
+    <None Include="Resources\missionaccepted.png" />
+    <None Include="Resources\missionabandoned.png" />
+    <None Include="Resources\marketsell.png" />
+    <None Include="Resources\marketbuy.png" />
+    <None Include="Resources\newcommander.png" />
+    <None Include="Resources\promotion.png" />
+    <None Include="Resources\rebootrepair.png" />
+    <None Include="Resources\sellexplorationdata.png" />
+    <None Include="Resources\selldrones.png" />
+    <None Include="Resources\powerplayvote.png" />
+    <None Include="Resources\powerplayleave.png" />
+    <None Include="Resources\powerplaysalary.png" />
+    <None Include="Resources\powerplayjoin.png" />
+    <None Include="Resources\powerplaydefect.png" />
+    <None Include="Resources\powerplaydeliver.png" />
+    <None Include="Resources\powerplaycollect.png" />
+    <None Include="Resources\powerplayfasttrack.png" />
+    <None Include="Resources\powerplayvoucher.png" />
+    <None Include="Resources\shieldsup.png" />
+    <None Include="Resources\shieldsdown.png" />
+    <None Include="Resources\star.png" />
+    <None Include="Resources\Log.png" />
+    <None Include="Resources\travelgrid.png" />
+    <None Include="Resources\material.png" />
+    <None Include="Resources\ledger.png" />
+    <None Include="Resources\journal.png" />
+    <None Include="Resources\stats.png" />
+    <None Include="Resources\popout.png" />
+    <None Include="Resources\Star_K1IV.png" />
+    <None Include="Resources\Ring Only.png" />
+    <None Include="Resources\Ring Only 512.png" />
+    <None Include="Resources\materialmarker.png" />
+    <None Include="Resources\M5V.png" />
+    <None Include="Resources\K0V.png" />
+    <None Include="Resources\K1IV.png" />
+    <None Include="Resources\L3V.png" />
+    <None Include="Resources\M1VA.png" />
+    <None Include="Resources\Y2.png" />
+    <None Include="Resources\metal_rich.png" />
+    <None Include="Resources\O.png" />
+    <None Include="Resources\Rocky_Body_Sand2.png" />
+    <None Include="Resources\T4V.png" />
+    <None Include="Resources\Water_World_No_Poles_Clouds.png" />
+    <None Include="Resources\Neutron_Star.png" />
+    <None Include="Resources\Rocky_Ice_World_Sol_Titan.png" />
+    <None Include="Resources\Water_Giant1.png" />
+    <None Include="Resources\Moon24.png" />
+    <None Include="Resources\materialmarkerpurple.png" />
+    <None Include="Resources\materialmarkerorange.png" />
+    <None Include="Resources\planet landing.png" />
+    <None Include="Resources\RingGap512.png" />
+    <None Include="Resources\materiamoreindicator.png" />
+    <None Include="Resources\materialmarkerorangefilled.png" />
+    <None Include="Resources\SizeSelectorsLarge.png" />
+    <None Include="Resources\SizeSelectorsMedium.png" />
+    <None Include="Resources\SizeSelectorsSmall.png" />
+    <None Include="Resources\SizeSelectorsTiny.png" />
+    <None Include="Resources\materialrare.png" />
+    <None Include="Resources\Water_World_Poles_Cloudless4.png" />
+    <Content Include="x86\Microsoft.VC100.CRT\msvcp100.dll" />
+    <Content Include="x86\Microsoft.VC100.CRT\msvcr100.dll" />
+    <Content Include="x86\SQLite.Interop.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <None Include="AppSettingsSecrets.config.example">
+      <SubType>Designer</SubType>
+    </None>
+    <None Include="AppSettingsSecrets.config">
+      <SubType>Designer</SubType>
+    </None>
+    <None Include="Resources\Home-icon.png" />
+    <None Include="Resources\Travelicon.png" />
+    <None Include="Resources\save.png" />
     <Content Include="trilateration.js">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <EmbeddedResource Include="2DMap\FormSagCarinaMission.resx">
-      <DependentUpon>FormSagCarinaMission.cs</DependentUpon>
+    <EmbeddedResource Include="2DMap\Form2DMap.resx">
+      <DependentUpon>Form2DMap.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="2DMap\ImageViewer.resx">
       <DependentUpon>ImageViewer.cs</DependentUpon>
@@ -223,8 +967,47 @@
     <EmbeddedResource Include="3DMap\FormMap.resx">
       <DependentUpon>FormMap.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="ImageHandler\ImageHandler.resx">
+    <EmbeddedResource Include="Export\ExportControl.resx">
+      <DependentUpon>ExportControl.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\AboutForm.resx">
+      <DependentUpon>AboutForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\AssignTravelLogSystemForm.resx">
+      <DependentUpon>AssignTravelLogSystemForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\BookmarkForm.resx">
+      <DependentUpon>BookmarkForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\NewReleaseForm.resx">
+      <DependentUpon>NewReleaseForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\SplashForm.resx">
+      <DependentUpon>SplashForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\TimedMessage.resx">
+      <DependentUpon>TimedMessage.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\InfoForm.resx">
+      <DependentUpon>InfoForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\RecordStep.resx">
+      <DependentUpon>RecordStep.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\SummaryPopOut.resx">
+      <DependentUpon>SummaryPopOut.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\ThemeEditor.resx">
+      <DependentUpon>ThemeEditor.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ImageHandler.resx">
       <DependentUpon>ImageHandler.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\MoveToCommander.resx">
+      <DependentUpon>MoveToCommander.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="JournalViewControl.resx">
+      <DependentUpon>JournalViewControl.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
@@ -239,20 +1022,21 @@
     <Content Include="fge-logo-001-dark.ico">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="SQLite.Interop.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
     <EmbeddedResource Include="RouteControl.resx">
       <DependentUpon>RouteControl.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="StatsForm.resx">
-      <DependentUpon>StatsForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="SystemViewForm.resx">
+    <EmbeddedResource Include="Forms\SystemViewForm.resx">
       <DependentUpon>SystemViewForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="SavedRouteExpeditionControl.resx">
+      <DependentUpon>SavedRouteExpeditionControl.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Settings.resx">
+      <DependentUpon>Settings.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="TravelHistoryControl.resx">
       <DependentUpon>TravelHistoryControl.cs</DependentUpon>
+      <SubType>Designer</SubType>
     </EmbeddedResource>
     <EmbeddedResource Include="Trilateration\TrilaterationControl.resx">
       <DependentUpon>TrilaterationControl.cs</DependentUpon>
@@ -270,7 +1054,9 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="App.config" />
+    <None Include="App.config">
+      <SubType>Designer</SubType>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.0">
@@ -298,20 +1084,79 @@
     <Folder Include="Maps\" />
     <Folder Include="SQLite\" />
   </ItemGroup>
+  <UsingTask TaskName="Zip" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.v4.0.dll">
+    <ParameterGroup>
+      <OutputFilename ParameterType="System.String" Required="true" />
+      <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Reference Include="System.IO.Compression" />
+      <Using Namespace="System.IO.Compression" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        try
+        {
+          using (Stream zipStream = new FileStream(Path.GetFullPath(OutputFilename), FileMode.Create, FileAccess.Write))
+          using (ZipArchive archive = new ZipArchive(zipStream, ZipArchiveMode.Create))
+          {
+              foreach (ITaskItem fileItem in Files)
+              {
+                  string filename = fileItem.ItemSpec;
+                  string name = fileItem.GetMetadata("Name");
+                  if (String.IsNullOrEmpty(name)) name = Path.GetFileName(filename);
+                  using (Stream fileStream = new FileStream(filename, FileMode.Open, FileAccess.Read))
+                      using (Stream fileStreamInZip = archive.CreateEntry(name).Open())
+                          fileStream.CopyTo(fileStreamInZip);
+              }
+          }
+          return true;
+        }
+        catch (Exception ex)
+        {
+          Log.LogErrorFromException(ex);
+          return false;
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
     <PostBuildEvent>
-copy ..\..\SQLite.Interop.dll  .
-    if not exist "$(TargetDir)x86" md "$(TargetDir)x86"
-    xcopy /s /y "$(SolutionDir)packages\Noesis.Javascript.0.7.1.0\NativeBinaries\net40\x86\*.*" "$(TargetDir)x86"
-    if not exist "$(TargetDir)amd64" md "$(TargetDir)amd64"
-    xcopy /s /y "$(SolutionDir)packages\Noesis.Javascript.0.7.1.0\NativeBinaries\net40\amd64\*.*" "$(TargetDir)amd64"</PostBuildEvent>
+    </PostBuildEvent>
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
   </Target>
-  <Target Name="AfterBuild">
-  </Target>
   -->
+  <Target Name="AfterBuild" Condition=" '$(OS)' != 'Unix' ">
+    <ItemGroup>
+      <ZipFiles Include="$(OutputPath)\EDDiscovery.exe" />
+      <ZipFiles Include="$(OutputPath)\EDDiscovery.pdb" />
+      <ZipFiles Include="$(ProjectDir)\App.Portable.config">
+        <Name>EDDiscovery.exe.config</Name>
+      </ZipFiles>
+      <ZipFiles Include="$(OutputPath)\fround.js" />
+      <ZipFiles Include="$(OutputPath)\trilateration.js" />
+      <ZipFiles Include="$(OutputPath)\Newtonsoft.Json.dll" />
+      <ZipFiles Include="$(OutputPath)\OpenTK.GLControl.dll" />
+      <ZipFiles Include="$(OutputPath)\OpenTK.dll" />
+      <ZipFiles Include="$(OutputPath)\System.Data.SQLite.dll" />
+      <ZipFiles Include="$(OutputPath)\System.Data.SQLite.Linq.dll" />
+      <ZipFiles Include="$(OutputPath)\System.Data.SQLite.xml" />
+      <ZipFiles Include="..\packages\System.Data.SQLite.Core.1.0.103\build\net46\x86\SQLite.Interop.dll">
+        <Name>x86\SQLite.Interop.dll</Name>
+      </ZipFiles>
+      <ZipFiles Include="..\packages\System.Data.SQLite.Core.1.0.103\build\net46\x64\SQLite.Interop.dll">
+        <Name>x64\SQLite.Interop.dll</Name>
+      </ZipFiles>
+    </ItemGroup>
+    <Zip OutputFileName="$(OutputPath)\EDDiscovery.Portable.zip" Files="@(ZipFiles)" />
+  </Target>
+  <Import Project="..\packages\System.Data.SQLite.Core.1.0.103\build\net46\System.Data.SQLite.Core.targets" Condition="Exists('..\packages\System.Data.SQLite.Core.1.0.103\build\net46\System.Data.SQLite.Core.targets')" />
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\System.Data.SQLite.Core.1.0.103\build\net46\System.Data.SQLite.Core.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\System.Data.SQLite.Core.1.0.103\build\net46\System.Data.SQLite.Core.targets'))" />
+  </Target>
 </Project>

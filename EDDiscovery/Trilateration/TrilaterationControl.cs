@@ -1,28 +1,26 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Drawing;
-using System.Globalization;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using EDDiscovery.DB;
-using EDDiscovery2;
-using ThreadState = System.Threading.ThreadState;
-using EDDiscovery2.Trilateration;
 using EDDiscovery2.EDSM;
+using EDDiscovery2.DB;
 
 namespace EDDiscovery
 {
     public partial class TrilaterationControl : UserControl
     {
         private EDDiscoveryForm _discoveryForm;
-        private SystemClass TargetSystem;
-        private Thread trilaterationThread;
-        private Trilateration.Result lastTrilatelationResult;
-        private Dictionary<SystemClass, Trilateration.Entry> lastTrilatelationEntries;
+        private ISystem TargetSystem;
         private Thread EDSMSubmissionThread;
+        private EDSMClass edsm;
+        private List<WantedSystemClass> wanted;
+
+        /** This global should be set if the next CurrentCellChanged() event should skip to the next editable cell.
+         * This should be the case whenver a keyboard event causes cells to change, but not on mouse-initiated events */
+        private bool skipReadOnlyCells = false;
 
         public TrilaterationControl()
         {
@@ -33,28 +31,46 @@ namespace EDDiscovery
         {
             _discoveryForm = discoveryForm;
             FreezeTrilaterationUI();
+            edsm = new EDSMClass();
+            edsm.apiKey = EDDiscoveryForm.EDDConfig.CurrentCommander.APIKey;
+            edsm.commanderName = EDDiscoveryForm.EDDConfig.CurrentCommander.EdsmName;
+            SetTriStatus("Press Start New");
         }
-
-
-        public void Set(SystemClass system)
+        
+        public void Set(ISystem system)
         {
-            if (TargetSystem == null || !TargetSystem.Equals(system))
+            if (TargetSystem == null || system == null || !TargetSystem.Equals(system))
             {
                 TargetSystem = system;
                 ClearDataGridViewDistancesRows();
             }
 
-            if (TargetSystem == null) return;
+            if (TargetSystem == null)
+                return;
 
             textBoxSystemName.Text = TargetSystem.name;
-            labelStatus.Text = "Enter Distances";
-            labelStatus.BackColor = Color.LightBlue;
+
+            if (TargetSystem.HasCoordinate)
+            {
+                textBoxCoordinateX.Text = TargetSystem.x.ToString();
+                textBoxCoordinateY.Text = TargetSystem.y.ToString();
+                textBoxCoordinateZ.Text = TargetSystem.z.ToString();
+
+                SetTriStatusSuccess("Has Coordinates!");
+            }
+            else
+            {
+                SetTriStatusError("Enter Distances");
+            }
 
             UnfreezeTrilaterationUI();
             dataGridViewDistances.Focus();
 
-            PopulateSuggestedSystems();
-            PopulateClosestSystems();
+            dataGridViewClosestSystems.Rows.Clear();
+            PopulateLocalWantedSystems();
+            Thread ViewPushedSystemsThread = new Thread(ViewPushedSystems) { Name = "EDSM get pushed systems" };
+            ViewPushedSystemsThread.Start();
+
         }
 
         private List<SystemClass> GetEnteredSystems()
@@ -73,67 +89,128 @@ namespace EDDiscovery
 
         private void dataGridViewDistances_EditingControlShowing(object sender, DataGridViewEditingControlShowingEventArgs e)
         {
-            var textbox = (TextBox)e.Control;
-
-            if (dataGridViewDistances.CurrentCell.ColumnIndex != 0)
+            try
             {
-                textbox.AutoCompleteMode = AutoCompleteMode.None;
-                return;
-            }
-            
-            textbox.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
-            textbox.AutoCompleteSource = AutoCompleteSource.CustomSource;
-            var items = new AutoCompleteStringCollection();
+                var textbox = (TextBox)e.Control;
 
-            var enteredSystems = GetEnteredSystems();
-            items.AddRange((
-                from s
-                in SystemData.SystemList
-                where s.HasCoordinate && (s.name == textbox.Text || !enteredSystems.Contains(s))
-                orderby s.name ascending
-                select s.name
-            ).ToArray());
-            
-            textbox.AutoCompleteCustomSource = items;
+                if (dataGridViewDistances.CurrentCell.ColumnIndex != 0)
+                {
+                    textbox.AutoCompleteMode = AutoCompleteMode.None;
+                    return;
+                }
+
+                // TBD Used to be an autocomplete..
+            }
+            catch (Exception ex)
+            {
+                this.BeginInvoke(new MethodInvoker(() =>
+                {
+                    LogTextHighlight("ViewPushedSystems Exception:" + ex.Message);
+                    LogText(ex.StackTrace);
+                }));
+
+            }
         }
 
         private void dataGridViewDistances_CellValidating(object sender, DataGridViewCellValidatingEventArgs e)
         {
-            if (e.ColumnIndex == 0)
+            try
             {
-                var value = e.FormattedValue.ToString();
-                var cell = dataGridViewDistances[e.ColumnIndex, e.RowIndex];
-
-                if (value == "" && (cell.Value == null || cell.Value.ToString() == ""))
+                if (e.ColumnIndex == 0)
                 {
-                    return;
+                    var value = e.FormattedValue.ToString();
+                    var cell = dataGridViewDistances[e.ColumnIndex, e.RowIndex];
+
+                    if (value == "" && (cell.Value == null || cell.Value.ToString() == ""))
+                    {
+                        return;
+                    }
+
+                    var system = SystemClass.GetSystem(value);
+                    var enteredSystems = GetEnteredSystems();
+                    if (cell.Value != null)
+                    {
+                        enteredSystems.RemoveAll(s => s.name == cell.Value.ToString());
+                    }
+
+                    if (system == null || (enteredSystems.Contains(system)))
+                    {
+                        return;
+                    }
                 }
 
-                var system = SystemData.GetSystem(value);
-                var enteredSystems = GetEnteredSystems();
-                if (cell.Value != null)
+                if (e.ColumnIndex == 1)
                 {
-                    enteredSystems.RemoveAll(s => s.name == cell.Value.ToString());
-                }
+                    var value = e.FormattedValue.ToString().Trim();
+                    if (value == "")
+                    {
+                        dataGridViewDistances.Rows[e.RowIndex].ErrorText = null;
+                        return;
+                    }
 
-                if (system == null || (enteredSystems.Contains(system)))
-                {
-                    //e.Cancel = true;
-                    return;
+                    var parsed = DistanceParser.ParseInterstellarDistance(value);
+                    if (parsed.HasValue)
+                    {
+                        dataGridViewDistances.Rows[e.RowIndex].ErrorText = null;
+                    }
+                    else
+                    {
+                        e.Cancel = true;
+                        dataGridViewDistances.Rows[e.RowIndex].ErrorText = "Invalid number";
+                    }
                 }
             }
-
-            if (e.ColumnIndex == 1)
+            catch (Exception ex)
             {
-                var value = e.FormattedValue.ToString().Trim();
-
-                if (value == "")
+                this.BeginInvoke(new MethodInvoker(() =>
                 {
-                    return;
-                }
+                    LogTextHighlight("Exception:" + ex.Message);
+                    LogText(ex.StackTrace);
+                }));
 
-                var regex = new Regex(@"^\d{1,5}([,.]\d{1,2})?$");
-                e.Cancel = !regex.Match(e.FormattedValue.ToString()).Success;
+            }
+        }
+
+        /* Tries to load the system data for the given name. If no system data is available, but the system is known,
+         * it creates a new System entity, otherwise logs it and returns null. */
+        private SystemClass getSystemForTrilateration(string systemName)
+        {
+            var system = SystemClass.GetSystem(systemName);
+
+            if (system == null)
+            {
+                if (!edsm.IsKnownSystem(systemName))
+                {
+                    LogTextHighlight("Only systems with coordinates or already known to EDSM can be added" + Environment.NewLine);
+                }
+                else
+                {
+                    system = new SystemClass(systemName);
+                }
+            }
+            return system;
+        }
+
+        /* Callback for when a new system has been added to the grid.
+         * Performs some additional setup such as clearing data and setting the status. */
+        private void newSystemAdded(DataGridViewCell cell, SystemClass system)
+        {
+            if (!cell.Value.Equals(system.name))            // if cell value is not the same as system name
+            {
+                cell.Value = system.name;
+            }
+            cell.Tag = system;
+            // reset any calculated distances
+            dataGridViewDistances[2, cell.RowIndex].Value = null;
+            // (re)set status
+            if (system.HasCoordinate)
+            {
+                dataGridViewDistances[3, cell.RowIndex].Value = null;
+            }
+            else
+            {
+                dataGridViewDistances[3, cell.RowIndex].Value = "Position unknown";
+                dataGridViewDistances[3, cell.RowIndex].Style.ForeColor = _discoveryForm.theme.NonVisitedSystemColor;
             }
         }
 
@@ -143,45 +220,55 @@ namespace EDDiscovery
             {
                 var cell = dataGridViewDistances[e.ColumnIndex, e.RowIndex];
                 var value = cell.Value as string;
-                cell.Style.BackColor = Color.White;
                 if (value == null)
                 {
                     return;
                 }
-                var system = SystemData.GetSystem(value);
 
-                if (system == null)
+                var enteredSystems = GetEnteredSystems();
+
+                if (enteredSystems.Count > e.RowIndex)  //don't do the below if we're entering something that's not in enteredSystems yet (we need to set cell.tag lower down the first time through here)
                 {
-                    cell.Value = null;
-                    //cell.Style.BackColor = Color.Salmon;
+                    if (value.Equals(enteredSystems[e.RowIndex].name)) // If we change a row to same value as before dont do anything from doubleclick or pastinf same new for example
+                    {
+                        return;
+                    }
+                }
+                if (enteredSystems.Where(es => es.name == value).Count() > 0)
+                {
+                    LogTextHighlight("Duplicate system entry is not allowed" + Environment.NewLine);
+                    this.BeginInvoke(new MethodInvoker(() =>
+                    {
+                        dataGridViewDistances.Rows.Remove(dataGridViewDistances.Rows[e.RowIndex]);
+                    }));
                     return;
                 }
 
-                if (value != system.name)
+                var system = getSystemForTrilateration(value);
+                if (system == null)
                 {
-                    cell.Value = system.name;
+                    this.BeginInvoke(new MethodInvoker(() =>
+                    {
+                        dataGridViewDistances.Rows.Remove(dataGridViewDistances.Rows[e.RowIndex]);
+                    }));
+                    return;
                 }
-                cell.Tag = system;
+                newSystemAdded(cell, system);
             }
-
-            // reset any calculated distances
-            dataGridViewDistances[2, e.RowIndex].Value = null;
-            dataGridViewDistances[3, e.RowIndex].Value = null;
-
-            // trigger trilateration calculation
-            RunTrilateration();
-        }
-
-        private void RunTrilateration()
-        {
-            if (trilaterationThread != null)
+            else if (e.ColumnIndex == 1)
             {
-                if (trilaterationThread.ThreadState != ThreadState.Stopped)
-                    LogText("Aborting previous trilateration attempt." + Environment.NewLine);
-                trilaterationThread.Abort();
+                if (dataGridViewDistances[1, e.RowIndex].Value != null && !string.IsNullOrEmpty(dataGridViewDistances[1, e.RowIndex].Value.ToString().Trim()))
+                {
+                    var value = dataGridViewDistances[1, e.RowIndex].Value.ToString().Trim();
+                    var parsedDistance = DistanceParser.ParseInterstellarDistance(value);
+                    if (parsedDistance.HasValue)
+                    {
+                        dataGridViewDistances[1, e.RowIndex].Value = parsedDistance.Value.ToString("F2");
+                    }
+                }
             }
-            trilaterationThread = new Thread(RunTrilaterationWorker) { Name = "Trilateration" };
-            trilaterationThread.Start();
+            /* skip to the next editable cell */
+            skipReadOnlyCells = true;
         }
 
 
@@ -192,217 +279,30 @@ namespace EDDiscovery
                 return (dataGridViewDistances.Rows.OfType<DataGridViewRow>().Select(row => row.Cells[0].Tag)).OfType<SystemClass>();
             }
         }
-
-        private void RunTrilaterationWorker()
-        { 
-            var systemsEntries = new Dictionary<SystemClass, Trilateration.Entry>();
-            
-            for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
-            {
-                var systemCell = dataGridViewDistances[0, i];
-                var distanceCell = dataGridViewDistances[1, i];
-
-                if (systemCell.Tag == null || distanceCell.Value == null)
-                {
-                    continue;
-                }
-
-                var system = (SystemClass)systemCell.Tag;
-                var culture = new CultureInfo("en-US");
-                var distance = double.Parse(distanceCell.Value.ToString().Replace(",", "."), culture);
-
-                var entry = new Trilateration.Entry(system.x, system.y, system.z, distance);
-
-                systemsEntries.Add(system, entry);
-            }
-
-            if (systemsEntries.Count < 3)
-            {
-                return;
-            }
-
-            Invoke((MethodInvoker) delegate
-            {
-                LogText("Starting trilateration..." + Environment.NewLine);
-                labelStatus.Text = "Calculating…";
-                labelStatus.BackColor = Color.Gold;
-            });
-
-            var trilateration = new Trilateration {Logger = Console.WriteLine};
-
-            foreach (var item in systemsEntries)
-            {
-                trilateration.AddEntry(item.Value);
-            }
-
-            //var trilaterationResultCS = trilateration.RunCSharp();
-            var trilaterationAlgorithm = radioButtonAlgorithmJs.Checked
-                ? Trilateration.Algorithm.RedWizzard_Emulated
-                : Trilateration.Algorithm.RedWizzard_Native;
-
-            var stopwatch = new Stopwatch();
-            stopwatch.Start();
-
-            var trilaterationResult = trilateration.Run(trilaterationAlgorithm);
-
-            stopwatch.Stop();
-            var spentTimeString = (stopwatch.ElapsedMilliseconds / 1000.0).ToString("0.0000") + "ms";
-
-            lastTrilatelationResult = trilaterationResult;
-            lastTrilatelationEntries = systemsEntries;
-
-            if (trilaterationResult.State == Trilateration.ResultState.Exact)
-            {
-                Invoke((MethodInvoker) delegate
-                {
-                    SystemClass s1, s2, s3;
-
-                    s1 = SystemData.GetSystem("Sol");
-                    s2 = SystemData.GetSystem("Sagittarius A*");
-                    s3 = new SystemClass();
-
-                    s3.x = trilaterationResult.Coordinate.X;
-                    s3.y = trilaterationResult.Coordinate.Y;
-                    s3.z = trilaterationResult.Coordinate.Z;
-
-                    LogText("Trilateration successful (" + spentTimeString + "), exact coordinates found." + Environment.NewLine);
-                    LogText("x=" + trilaterationResult.Coordinate.X + ", y=" + trilaterationResult.Coordinate.Y + ", z=" + trilaterationResult.Coordinate.Z + " Sol: " + SystemData.Distance(s1, s3).ToString("0.0") +  " Sag A* " + SystemData.Distance(s2, s3).ToString("0.0") + Environment.NewLine);
-                    labelStatus.Text = "Success, coordinates found!";
-                    labelStatus.BackColor = Color.LawnGreen;
-                });
-            } else if (trilaterationResult.State == Trilateration.ResultState.NotExact || trilaterationResult.State == Trilateration.ResultState.MultipleSolutions)
-            {
-                Invoke((MethodInvoker) delegate
-                {
-                    LogText("Trilateration not successful (" + spentTimeString + "), only approximate coordinates found." + Environment.NewLine);
-                    //LogText("x=" + trilaterationResult.Coordinate.X + ", y=" + trilaterationResult.Coordinate.Y + ", z=" + trilaterationResult.Coordinate.Z + Environment.NewLine);
-                    LogText("Enter more distances." + Environment.NewLine);
-                    labelStatus.Text = "Enter More Distances";
-                    labelStatus.BackColor = Color.Orange;
-                });
-            } else if (trilaterationResult.State == Trilateration.ResultState.NeedMoreDistances)
-            {
-                Invoke((MethodInvoker) delegate
-                {
-                    LogText("Trilateration not successful (" + spentTimeString + "), coordinates not found." + Environment.NewLine);
-                    LogText("Enter more distances." + Environment.NewLine);
-                    labelStatus.Text = "Enter More Distances";
-                    labelStatus.BackColor = Color.Red;
-                    ClearCalculatedDataGridViewDistancesRows();
-                });
-            }
-            
-            // update trilaterated coordinates
-            if (trilaterationResult.Coordinate != null)
-            {
-                Invoke((MethodInvoker) delegate
-                {
-                    textBoxCoordinateX.Text = trilaterationResult.Coordinate.X.ToString();
-                    textBoxCoordinateY.Text = trilaterationResult.Coordinate.Y.ToString();
-                    textBoxCoordinateZ.Text = trilaterationResult.Coordinate.Z.ToString();
-                    if (TargetSystem != null)
-                    {
-                        TargetSystem.x = trilaterationResult.Coordinate.X;
-                        TargetSystem.y = trilaterationResult.Coordinate.Y;
-                        TargetSystem.z = trilaterationResult.Coordinate.Z;
-                    }
-                    toolStripButtonMap.Enabled = (TargetSystem != null);
-
-                });
-
-
-                var suggestedSystems = GetListOfSuggestedSystems(trilaterationResult.Coordinate.X, 
-                                                                 trilaterationResult.Coordinate.Y,
-                                                                 trilaterationResult.Coordinate.Z, 16);
-
-                Invoke((MethodInvoker) (() => PopulateSuggestedSystems(suggestedSystems)));
-            }
-            else
-            {
-                Invoke((MethodInvoker) delegate
-                {
-                    textBoxCoordinateX.Text = "?";
-                    textBoxCoordinateY.Text = "?";
-                    textBoxCoordinateZ.Text = "?";
-                });
-            }
-
-            //var hasInvalidDistances = false;
-
-            // update dataGrid with calculated distances and status
-            var entriesDistances = trilaterationResult.EntriesDistances;
-                
-            for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
-            {
-                var systemCell = dataGridViewDistances[0, i];
-                var calculatedDistanceCell = dataGridViewDistances[2, i];
-                var statusCell = dataGridViewDistances[3, i];
-
-                calculatedDistanceCell.Value = null;
-                statusCell.Value = null;
-
-                if (entriesDistances == null || systemCell.Value == null || systemCell.Tag == null)
-                {
-                    continue;
-                }
-
-                var system = (SystemClass) systemCell.Tag;
-
-                if (!systemsEntries.ContainsKey(system)) // calculated without this system, so skip the row
-                {
-                    continue;
-                }
-
-                var systemEntry = systemsEntries[system];
-                var calculatedDistance = entriesDistances[systemEntry];
-
-                calculatedDistanceCell.Value = calculatedDistance.ToString();
-
-                if (systemEntry.Distance == calculatedDistance)
-                {
-                    calculatedDistanceCell.Style.ForeColor = Color.Green;
-                    statusCell.Value = "OK";
-                    statusCell.Style.ForeColor = Color.Green;
-                } else
-                {
-                        //hasInvalidDistances = true;
-                    calculatedDistanceCell.Style.ForeColor = Color.Salmon;
-                    statusCell.Value = "Wrong distance?";
-                    statusCell.Style.ForeColor = Color.Salmon;
-                }
-            }
-
-        }
-
-        private static IEnumerable<SystemClass> GetListOfSuggestedSystems(double x, double y, double z, int count)
-        {
-            var references = new SuggestedReferences(x, y, z);
-            var suggestedSystems = new List<SystemClass>();
-            for (int ii = 0; ii < count; ii++)
-            {
-                var rsys = references.GetCandidate();
-                if (rsys == null) break;
-                var system = rsys.System;
-                references.AddReferenceStar(system);
-                System.Diagnostics.Trace.WriteLine(string.Format("{0} Dist: {1} x:{2} y:{3} z:{4}", system.name,
-                    rsys.Distance.ToString("0.00"), system.x, system.y, system.z));
-                suggestedSystems.Add(system);
-            }
-            return suggestedSystems;
-        }
-
+        
         public void ClearDataGridViewDistancesRows()
         {
-            // keep systems, clear distances
-            for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
+            try
             {
-                var distanceCell = dataGridViewDistances[1, i];
-                var calculatedDistanceCell = dataGridViewDistances[2, i];
-                var statusCell = dataGridViewDistances[3, i];
+                // keep systems, clear distances
+                for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
+                {
+                    var systemCell = dataGridViewDistances[0, i];
+                    var distanceCell = dataGridViewDistances[1, i];
+                    var calculatedDistanceCell = dataGridViewDistances[2, i];
+                    var statusCell = dataGridViewDistances[3, i];
 
-                distanceCell.Value = null;
-                calculatedDistanceCell.Value = null;
-                statusCell.Value = null;
+                    var system = (SystemClass)systemCell.Tag;
+
+                    distanceCell.Value = null;
+                    calculatedDistanceCell.Value = null;
+                    if (system.HasCoordinate) statusCell.Value = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogTextHighlight("ClearDataGridViewDistancesRows Exception:" + ex.Message);
+                LogText(ex.StackTrace);
             }
         }
 
@@ -411,251 +311,222 @@ namespace EDDiscovery
             // keep systems and distances, clear calculated distances and statuses
             for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
             {
+                var systemCell = dataGridViewDistances[0, i];
                 var calculatedDistanceCell = dataGridViewDistances[2, i];
                 var statusCell = dataGridViewDistances[3, i];
 
+                var system = (SystemClass)systemCell.Tag;
+
                 calculatedDistanceCell.Value = null;
-                statusCell.Value = null;
+                if (system != null && system.HasCoordinate) statusCell.Value = null;
             }
         }
-
-        private void ClearDataGridViewClosestSystemsRows()
+        
+        private void PopulateLocalWantedSystems()
         {
-            dataGridViewClosestSystems.Rows.Clear();
-        }
+            wanted = WantedSystemClass.GetAllWantedSystems();
 
-        private void ClearDataGridViewSuggestedSystemsRows()
-        {
-            dataGridViewSuggestedSystems.Rows.Clear();
-        }
-
-        private void PopulateSuggestedSystems()
-        {
-            var lastKnown = LastKnownSystem;
-            if (lastKnown != null)
+            if (wanted != null && wanted.Any())
             {
-                var suggestedSystems = GetListOfSuggestedSystems(lastKnown.x,
-                                                                 lastKnown.y,
-                                                                 lastKnown.z, 16);
-                PopulateSuggestedSystems(suggestedSystems);
-                return;
-            }
-
-            var suggestedSystemNames = new List<string>
-            {
-                "Sol", "Sadr", "Maia", "Polaris", "EZ Orionis",
-                "Kappa-2 Coronae Austrinae", "Eta Carinae", "HR 969", "UX Sculptoris"
-            };
-            PopulateSuggestedSystems(suggestedSystemNames);
-        }
-
-        private void PopulateSuggestedSystems(ICollection<string> suggestedSystems)
-        {
-            dataGridViewSuggestedSystems.Rows.Clear();
-            foreach (var system in SystemData.SystemList)
-            {
-                if (!suggestedSystems.Contains(system.name))
+                foreach (WantedSystemClass sys in wanted)
                 {
-                    continue;
+                    SystemClass star = SystemClass.GetSystem(sys.system);
+                    if (star == null)
+                        star = new SystemClass(sys.system);
+
+                    var index = dataGridViewClosestSystems.Rows.Add("Local");
+                    dataGridViewClosestSystems[1, index].Value = sys.system;
+                    dataGridViewClosestSystems[1, index].Tag = star;
                 }
-                AddSuggestedSystem(system);
             }
-        }
-
-        private void AddSuggestedSystem(SystemClass system)
-        {
-
-            for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
+            else
             {
-                var systemCell = dataGridViewDistances[0, i];
-                if (systemCell.Value!=null)
-                    if (systemCell.Value.Equals(system.name))  // Dont add list thats already in distances. 
-                        return; 
+                wanted = new List<WantedSystemClass>();
             }
-
-                var index = dataGridViewSuggestedSystems.Rows.Add(system.name);
-            dataGridViewSuggestedSystems[0, index].Tag = system;
         }
 
-        private void PopulateSuggestedSystems(IEnumerable<SystemClass> suggestedSystems)
+        // Runs as a thread.
+        private void ViewPushedSystems()
         {
-            dataGridViewSuggestedSystems.Rows.Clear();
-            foreach (var system in suggestedSystems)
+            try
             {
-                AddSuggestedSystem(system);
+                List<String> systems = edsm.GetPushedSystems();
+
+                foreach (String system in systems)
+                {
+                    SystemClass star = SystemClass.GetSystem(system);
+                    if (star == null)
+                        star = new SystemClass(system);
+
+                    this.BeginInvoke(new MethodInvoker(() =>
+                    {
+                        var index = dataGridViewClosestSystems.Rows.Add("EDSM");
+                        dataGridViewClosestSystems[1, index].Value = system;
+                        dataGridViewClosestSystems[1, index].Tag = star;
+                    }));
+                }
+            }
+            catch (Exception ex)
+            {
+                this.BeginInvoke(new MethodInvoker(() =>
+                {
+                    LogTextHighlight("ViewPushedSystems Exception:" + ex.Message);
+                    LogText(ex.StackTrace);
+                }));
             }
         }
 
-
-        private void PopulateClosestSystems()
+        private void dataGridViewClosestSystems_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
         {
-            // TODO: in future, we want this to be "predicted" by the direction and distances
-
-            var lastKnown = LastKnownSystem;
-
-            if (lastKnown == null)
+            if (e.RowIndex >= 0)
             {
-                return;
-            }
-
-            labelLastKnownSystem.Text = lastKnown.name;
-
-            var closest = (from systems
-                           in SystemData.SystemList
-                           where systems != lastKnown && systems.HasCoordinate
-                           select new
-                           {
-                               System = systems,
-                               Distance = Math.Sqrt(Math.Pow(lastKnown.x - systems.x, 2) + Math.Pow(lastKnown.y - systems.y, 2) + Math.Pow(lastKnown.z - systems.z, 2))
-                           })
-                          .OrderBy(c => c.Distance)
-                          .Take(30);
-
-            foreach (var item in closest)
-            {
-                var index = dataGridViewClosestSystems.Rows.Add(item.System.name, Math.Round(item.Distance, 2).ToString("0.00") + " Ly");
-                dataGridViewClosestSystems[0, index].Tag = item.System;
+                var system = (SystemClass)dataGridViewClosestSystems[1, e.RowIndex].Tag;
+                AddSystemToDataGridViewDistances(system);
             }
         }
 
-        public SystemClass LastKnownSystem
-        {
-            get
-            {
-                var lastKnown = (from systems
-                    in _discoveryForm.visitedSystems
-                    where systems.curSystem != null && systems.curSystem.HasCoordinate
-                    orderby systems.time descending
-                    select systems.curSystem).FirstOrDefault();
-                return lastKnown;
-            }
-        }
-
-
-        public SystemClass CurrentSystem
-        {
-            get
-            {
-                var currentKnown = (from systems
-                    in _discoveryForm.visitedSystems
-                                 orderby systems.time descending
-                                 select systems.curSystem).FirstOrDefault();
-                return currentKnown;
-            }
-        }
-
-        private void dataGridViewClosestSystems_CellMouseDoubleClick(object sender, DataGridViewCellMouseEventArgs e)
-        {
-            var system = (SystemClass) dataGridViewClosestSystems[0, e.RowIndex].Tag;
-            AddSystemToDataGridViewDistances(system);
-        }
-
-        private void AddSystemToDataGridViewDistances(SystemClass system)
+        /* Adds a system to the grid if it's not already in there */
+        public void AddSystemToDataGridViewDistances(SystemClass system)
         {
             for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
             {
                 var cell = dataGridViewDistances[0, i];
-                if (cell.Tag != null && (SystemClass)cell.Tag == system)
+                SystemClass s2 = cell.Tag as SystemClass;
+                if (s2 != null && s2.name.Equals(system.name, StringComparison.OrdinalIgnoreCase))
                 {
                     return;
                 }
+                /* Should we fall-back on comparing cell.Value if call.Tag is null? */
             }
 
             var index = dataGridViewDistances.Rows.Add(system.name);
-            dataGridViewDistances[0, index].Tag = system;
+            newSystemAdded(dataGridViewDistances[0, index], system);
+        }
+
+        public void AddSystemToDataGridViewDistances(string systemName)
+        {
+            var system = getSystemForTrilateration(systemName);
+            if (system != null)
+            {
+                AddSystemToDataGridViewDistances(system);
+            }
         }
 
         private void toolStripButtonSubmitDistances_Click(object sender, EventArgs e)
         {
-            LogText("Submitting system to EDSM, please wait..." + Environment.NewLine);
-            FreezeTrilaterationUI();
-
-            if (trilaterationThread != null)
+            try
             {
-                trilaterationThread.Join();
-                trilaterationThread = null;
-            }
+                LogText("Submitting system to EDSM, please wait..." + Environment.NewLine);
+                FreezeTrilaterationUI();
 
-            // edge case - make sure distances were trilaterated
-            if (lastTrilatelationResult == null)
+                EDSMSubmissionThread = new Thread(SubmitToEDSM) { Name = "EDSM Submission" };
+                EDSMSubmissionThread.Start();
+            }
+            catch (Exception ex)
             {
-                LogText("EDSM submission aborted, local trilateration did not run properly." + Environment.NewLine, Color.Red);
-                UnfreezeTrilaterationUI();
-                return;
+                this.BeginInvoke(new MethodInvoker(() =>
+                {
+                    LogTextHighlight("SubmitDistances Exception:" + ex.Message);
+                    LogText(ex.StackTrace);
+                }));
+
             }
-
-
-
-            EDSMSubmissionThread = new Thread(SubmitToEDSM) {Name = "EDSM Submission"};
-            EDSMSubmissionThread.Start();
         }
 
         private void SubmitToEDSM()
         {
-            var travelHistoryControl = _discoveryForm.TravelControl;
-            string commanderName = travelHistoryControl.GetCommanderName();
-
-            if (string.IsNullOrEmpty(commanderName))
+            try
             {
-                MessageBox.Show("Please enter commander name before submitting the system!");
-                UnfreezeTrilaterationUI();
-                return;
-            }
+                edsm.apiKey = EDDiscoveryForm.EDDConfig.CurrentCommander.APIKey;
+                edsm.commanderName = EDDiscoveryForm.EDDConfig.CurrentCommander.EdsmName;
 
-            var distances = new Dictionary<string, double>();
-            foreach (var item in lastTrilatelationEntries)
-            {
-                var system = item.Key;
-                var entry = item.Value;
-                distances.Add(system.name, entry.Distance);
-            }
+                var travelHistoryControl = _discoveryForm.TravelControl;
+                if (string.IsNullOrEmpty(edsm.commanderName))
+                {
+                    string commanderName = EDDiscoveryForm.EDDConfig.CurrentCommander.EdsmName;
 
-            var edsm = new EDSMClass();
-        
+                    if (string.IsNullOrEmpty(commanderName))
+                    {
+                        MessageBox.Show("Please enter commander name before submitting the system!");
+                        UnfreezeTrilaterationUI();
+                        return;
+                    }
+                    edsm.commanderName = commanderName;
+                }
+                var distances = new Dictionary<string, double>();
+                for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
+                {
+                    var systemCell = dataGridViewDistances[0, i];
+                    var distanceCell = dataGridViewDistances[1, i];
+                    if (systemCell.Value != null && distanceCell.Value != null)
+                    {
+                        var system = systemCell.Value.ToString();
 
-            var responseM = edsm.SubmitDistances(commanderName, TargetSystem.name, distances);
+                        var value = distanceCell.Value.ToString().Trim();
+                        var parsedDistance = DistanceParser.ParseInterstellarDistance(value);
 
-            Console.WriteLine(responseM);
+                        if (parsedDistance.HasValue)
+                        {
+                            // can over-ride drop down now if it's a real system so you could add duplicates if you wanted (even once I've figured out issue #81 which makes it easy if not likely...)
+                            if (!distances.Keys.Contains(system))
+                            {
+                                distances.Add(system, parsedDistance.Value);
+                            }
+                        }
+                    }
 
-            string infoM;
-            bool trilaterationOkM;
-            var responseOkM = edsm.ShowDistanceResponse(responseM, out infoM, out trilaterationOkM);
+                }
 
-            Console.WriteLine(infoM);
+                var responseM = edsm.SubmitDistances(edsm.commanderName, TargetSystem.name, distances);
 
-            Invoke((MethodInvoker) delegate
-            {
+                Console.WriteLine(responseM);
+
+                string infoM;
+                bool trilaterationOkM;
+                var responseOkM = edsm.ShowDistanceResponse(responseM, out infoM, out trilaterationOkM);
+
+                Console.WriteLine(infoM);
+
+                Invoke((MethodInvoker)delegate
+               {
+                   if (responseOkM && trilaterationOkM)
+                   {
+                       LogTextSuccess("EDSM submission succeeded, trilateration successful." + Environment.NewLine);
+                   }
+                   else if (responseOkM)
+                   {
+                       LogTextHighlight("EDSM submission succeeded, but trilateration failed. Try adding more distances." + Environment.NewLine);
+                   }
+                   else
+                   {
+                       LogTextHighlight("EDSM submission failed." + Environment.NewLine);
+                   }
+
+               });
+
                 if (responseOkM && trilaterationOkM)
                 {
-                    LogText("EDSM submission succeeded, trilateration successful." + Environment.NewLine, Color.Green);
-                }
-                else if (responseOkM)
-                {
-                    LogText("EDSM submission succeeded, but trilateration failed. Try adding more distances." + Environment.NewLine, Color.Orange);
+                    Invoke((MethodInvoker)delegate
+                   {
+                        UnfreezeTrilaterationUI();
+                        _discoveryForm.RefreshHistoryAsync();
+                        checkForUnknownSystemsNowKnown();
+                   });
                 }
                 else
                 {
-                    LogText("EDSM submission failed." + Environment.NewLine, Color.Red);
+                    Invoke((MethodInvoker)UnfreezeTrilaterationUI);
                 }
 
-            });
-
-            if (responseOkM && trilaterationOkM)
-            {
-                Invoke((MethodInvoker) delegate
-                {
-                    //Visible = false;
-                    UnfreezeTrilaterationUI();
-                    travelHistoryControl.TriggerEDSMRefresh(); // TODO we might eventually avoid this by further parsing EDSC response
-                    travelHistoryControl.RefreshHistory();
-
-                });
             }
-            else
+            catch (Exception ex)
             {
-                Invoke((MethodInvoker) UnfreezeTrilaterationUI);
-                lastTrilatelationResult = null;
-                lastTrilatelationEntries = null;
+                this.BeginInvoke(new MethodInvoker(() =>
+                {
+                    LogTextHighlight("SubmitToEDSM Exception:" + ex.Message);
+                    LogText(ex.StackTrace);
+                }));
+
             }
         }
 
@@ -664,79 +535,73 @@ namespace EDDiscovery
             
             dataGridViewDistances.Enabled = false;
             dataGridViewClosestSystems.Enabled = false;
-            dataGridViewSuggestedSystems.Enabled = false;
         }
 
         private void UnfreezeTrilaterationUI()
         {
             dataGridViewDistances.Enabled = true;
             dataGridViewClosestSystems.Enabled = true;
-            dataGridViewSuggestedSystems.Enabled = true;
             Dock = DockStyle.Fill;
         }
-
-        private void radioButtonAlgorithm_CheckedChanged(object sender, EventArgs e)
+        
+        private void SetTriStatus(string st)
         {
-            // when algorithm is changed, we want to re-run trilateration
-            RunTrilateration();
+            textBox_status.ForeColor = _discoveryForm.theme.TextBlockColor;
+            textBox_status.BackColor = _discoveryForm.theme.TextBackColor;
+            textBox_status.Text = st;
         }
 
+        private void SetTriStatusSuccess(string st)
+        {
+            textBox_status.ForeColor = _discoveryForm.theme.TextBackColor;
+            textBox_status.BackColor = _discoveryForm.theme.TextBlockSuccessColor;
+            textBox_status.Text = st;
+        }
 
+        private void SetTriStatusError(string st)
+        {
+            textBox_status.ForeColor = _discoveryForm.theme.TextBackColor;
+            textBox_status.BackColor = _discoveryForm.theme.TextBlockHighlightColor;
+            textBox_status.Text = st;
+        }
 
         public void LogText(string text)
         {
-            LogText(text, Color.Black);
+            LogTextColor(text, _discoveryForm.theme.TextBlockColor);
         }
-
-        public void LogText(string text, Color color)
+        public void LogTextHighlight(string text)
         {
-            try
-            {
-
-                richTextBox_History.SelectionStart = richTextBox_History.TextLength;
-                richTextBox_History.SelectionLength = 0;
-
-                richTextBox_History.SelectionColor = color;
-                richTextBox_History.AppendText(text);
-                richTextBox_History.SelectionColor = richTextBox_History.ForeColor;
-
-
-
-
-                richTextBox_History.SelectionStart = richTextBox_History.Text.Length;
-                richTextBox_History.SelectionLength = 0;
-                richTextBox_History.ScrollToCaret();
-                richTextBox_History.Refresh();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Trace.WriteLine("Exception SystemClass: " + ex.Message);
-                System.Diagnostics.Trace.WriteLine("Trace: " + ex.StackTrace);
-            }
+            LogTextColor(text, _discoveryForm.theme.TextBlockHighlightColor);
         }
-
-        private void dataGridViewSuggestedSystems_CellClick(object sender, DataGridViewCellEventArgs e)
+        public void LogTextSuccess(string text)
         {
-            var system = (SystemClass)dataGridViewSuggestedSystems[0, e.RowIndex].Tag;
-            AddSystemToDataGridViewDistances(system);
-            dataGridViewSuggestedSystems.Rows.RemoveAt(e.RowIndex);
+            LogTextColor(text, _discoveryForm.theme.TextBlockSuccessColor);
         }
 
+        private void LogTextColor(string text, Color color)
+        {
+            richTextBox_History.AppendText(text,color);
+        }
+        
         private void toolStripButtonNew_Click(object sender, EventArgs e)
         {
-			Set(CurrentSystem);
+            HistoryEntry he = _discoveryForm.history.GetLastFSD;
+            if ( he != null )
+                Set(he.System);
         }
 
         private void toolStripButtonMap_Click(object sender, EventArgs e)
         {
             var centerSystem = TargetSystem;
-            if (centerSystem == null || !centerSystem.HasCoordinate) centerSystem = LastKnownSystem;
-            FormMap map2 = new FormMap(centerSystem, _discoveryForm.SystemNames)
-            {
-                ReferenceSystems = CurrentReferenceSystems.ToList(),
-                visitedSystems = _discoveryForm.visitedSystems
-            };
-            map2.Show();
+            if (centerSystem == null || !centerSystem.HasCoordinate)
+                centerSystem = _discoveryForm.history.GetLastWithPosition.System;
+
+            var map = _discoveryForm.Map;
+
+            map.Prepare(centerSystem, _discoveryForm.settings.MapHomeSystem, centerSystem,
+                        _discoveryForm.settings.MapZoom, _discoveryForm.history.FilterByTravel);
+
+            map.Show();
         }
 
         private void dataGridViewDistances_CellClick(object sender, DataGridViewCellEventArgs e)
@@ -744,6 +609,9 @@ namespace EDDiscovery
             string text = null;
             try
             {
+                if (e.RowIndex == -1)
+                    return;
+
                 if (e.ColumnIndex == 0 && e.RowIndex < dataGridViewDistances.Rows.Count)
                 {
                     Object ob = dataGridViewDistances[e.ColumnIndex, e.RowIndex].Value;
@@ -754,7 +622,14 @@ namespace EDDiscovery
 
                     if (text != null)
                     {
-                        System.Windows.Forms.Clipboard.SetText(text);
+                        try
+                        {
+                            System.Windows.Forms.Clipboard.SetText(text);
+                        }
+                        catch
+                        {
+                            _discoveryForm.LogLineHighlight("Copying text to clipboard failed");
+                        }
                     }
                 }
             }
@@ -781,7 +656,14 @@ namespace EDDiscovery
 
                     if (text != null)
                     {
-                        System.Windows.Forms.Clipboard.SetText(text);
+                        try
+                        {
+                            System.Windows.Forms.Clipboard.SetText(text);
+                        }
+                        catch
+                        {
+                            _discoveryForm.LogLineHighlight("Copying text to clipboard failed");
+                        }
                     }
                 }
             }
@@ -795,7 +677,6 @@ namespace EDDiscovery
         private void toolStripButtonRemoveAll_Click(object sender, EventArgs e)
         {
             dataGridViewDistances.Rows.Clear();
-            PopulateSuggestedSystems();
         }
 
         private void toolStripButtonRemoveUnused_Click(object sender, EventArgs e)
@@ -812,5 +693,212 @@ namespace EDDiscovery
                 }
             }
         }
+
+        private void checkForUnknownSystemsNowKnown()
+        {
+            for (int i = 0, count = dataGridViewDistances.Rows.Count - 1; i < count; i++)
+            {
+                var systemCell = dataGridViewDistances[0, i];
+                var oldSystem = (SystemClass)systemCell.Tag;
+                if (!oldSystem.HasCoordinate)
+                {
+                    var value = systemCell.Value as string;
+                    var newSystem = SystemClass.GetSystem(value);
+                    if (newSystem != null && newSystem.HasCoordinate)
+                    {
+                        systemCell.Tag = newSystem;
+                        dataGridViewDistances[3, i].Style.ForeColor = _discoveryForm.theme.VisitedSystemColor;
+                        dataGridViewDistances[3, i].Value = "Position found";
+                    }
+                }
+            }
+        }
+
+        private void SelectNextEditableCell(DataGridView dataGridView)
+        {
+            DataGridViewCell cell = dataGridView.CurrentCell;
+            if(cell == null) return;
+            if (!skipReadOnlyCells) return;
+
+            int row = cell.RowIndex;
+            int col = cell.ColumnIndex;
+
+            if(row == dataGridView.RowCount && col == dataGridView.RowCount) return;
+
+            do {
+                col++;
+                if(col >= dataGridView.ColumnCount)
+                {
+                    col = 0;
+                    row++;
+                    if (row >= dataGridView.RowCount)
+                    {
+                        row = dataGridView.RowCount - 1;
+                        dataGridView.CurrentCell = dataGridView.Rows[row].Cells[col];
+                        return;
+                    }
+                }
+                cell = dataGridView.Rows[row].Cells[col];
+            } while( cell.ReadOnly );
+            dataGridView.CurrentCell = cell;
+            dataGridView.CurrentCell.Selected = true;
+            skipReadOnlyCells = false;
+
+            // Copy text to clipboard
+            DataGridViewTextBoxCell ob = (DataGridViewTextBoxCell)cell;
+            string text=null;
+            if (ob != null)
+                text = (string)ob.Value;
+            if (text != null)
+                try
+                {
+                    System.Windows.Forms.Clipboard.SetText(text);
+                }
+                catch
+                {
+                    _discoveryForm.LogLineHighlight("Copying text to clipboard failed");
+                }
+
+        }
+
+        private void dataGridViewDistances_KeyDown(object sender, KeyEventArgs e)
+        {
+            try
+            {
+                DataGridView self = sender as DataGridView;
+                /* On tab, skip over read-only cells */
+                if (self.Focused && e.KeyCode == Keys.Tab)
+                {
+                    skipReadOnlyCells = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.WriteLine("Exception dataGridViewDistances_KeyDown: " + ex.Message);
+                System.Diagnostics.Trace.WriteLine("Trace: " + ex.StackTrace);
+            }
+        }
+
+        /* This event is received when a new cell has been selected */
+        private void dataGridViewDistances_CurrentCellChanged(object sender, EventArgs e)
+        {
+            try {
+                DataGridView dgv = sender as DataGridView;
+                if (skipReadOnlyCells && dgv.CurrentCell.ReadOnly)
+                {
+					/* Have to run this delayed as otherwise we enter an even loop when changing cells */
+                    this.BeginInvoke(new MethodInvoker(() => {
+                        SelectNextEditableCell(sender as DataGridView);
+                    }));
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.WriteLine("Exception dataGridViewDistances_CurrentCellChanged: " + ex.Message);
+                System.Diagnostics.Trace.WriteLine("Trace: " + ex.StackTrace);
+            }
+        }
+
+        private void addToWantedSystemsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            IEnumerable<DataGridViewRow> selectedRows = dataGridViewDistances.SelectedCells.Cast<DataGridViewCell>()
+                                                                        .Select(cell => cell.OwningRow)
+                                                                        .Distinct()
+                                                                        .OrderBy(cell => cell.Index);
+            string sysName = "";
+            foreach (DataGridViewRow r in selectedRows)
+            {
+                if (r.Cells[0].Value != null)
+                {
+                    sysName = r.Cells[0].Value.ToString();
+                    AddWantedSystem(sysName);
+                }
+            }
+        }
+
+        public void AddWantedSystem(string sysName)
+        {
+            if (wanted == null)
+                PopulateLocalWantedSystems();
+            
+            WantedSystemClass entry = wanted.Where(x => x.system == sysName).FirstOrDefault();  //duplicate?
+
+            if (entry == null)
+            {
+                WantedSystemClass toAdd = new WantedSystemClass(sysName);       // make one..
+                toAdd.Add();                                                    // add to db.
+
+                wanted.Add(toAdd);
+
+                SystemClass star = SystemClass.GetSystem(sysName);
+                if (star == null)
+                    star = new SystemClass(sysName);
+
+                var index = dataGridViewClosestSystems.Rows.Add("Local");
+                dataGridViewClosestSystems[1, index].Value = sysName;
+                dataGridViewClosestSystems[1, index].Tag = star;
+            }
+        }
+
+        private void removeFromWantedSystemsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            IEnumerable<DataGridViewRow> selectedRows = dataGridViewClosestSystems.SelectedCells.Cast<DataGridViewCell>()
+                                                                       .Select(cell => cell.OwningRow)
+                                                                       .Distinct()
+                                                                       .OrderBy(cell => cell.Index);
+            string sysName = "";
+            foreach (DataGridViewRow r in selectedRows)
+            {
+                sysName = r.Cells[1].Value.ToString();
+                if (r.Cells[0].Value.ToString() == "Local")
+                {
+                    WantedSystemClass entry = wanted.Where(x => x.system == sysName).FirstOrDefault();
+                    if (entry != null)
+                    {
+                        entry.Delete();
+                        dataGridViewClosestSystems.Rows.Remove(r);
+                        wanted.Remove(entry);
+                    }
+                }
+                else
+                {
+                    LogText(String.Format("{0} is pushed from EDSM and cannot be removed", sysName) + Environment.NewLine);
+                }
+            }
+        }
+
+        private void viewOnEDSMToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            IEnumerable<DataGridViewRow> selectedRows = dataGridViewDistances.SelectedCells.Cast<DataGridViewCell>()
+                                                                        .Select(cell => cell.OwningRow)
+                                                                        .Distinct()
+                                                                        .OrderBy(cell => cell.Index);
+
+            this.Cursor = Cursors.WaitCursor;
+            var cellVal = selectedRows.First<DataGridViewRow>().Cells[0].Value;
+            if (cellVal != null)
+            {
+                string sysName = cellVal.ToString();
+                EDSMClass edsm = new EDSMClass();
+                if (!edsm.ShowSystemInEDSM(sysName)) LogTextHighlight("System could not be found - has not been synched or EDSM is unavailable" + Environment.NewLine);
+            }
+            this.Cursor = Cursors.Default;
+        }
+
+        private void viewOnEDSMToolStripMenuItem1_Click(object sender, EventArgs e)
+        {
+            IEnumerable<DataGridViewRow> selectedRows = dataGridViewClosestSystems.SelectedCells.Cast<DataGridViewCell>()
+                                                                        .Select(cell => cell.OwningRow)
+                                                                        .Distinct()
+                                                                        .OrderBy(cell => cell.Index);
+
+            this.Cursor = Cursors.WaitCursor;
+            string sysName = selectedRows.First<DataGridViewRow>().Cells[1].Value.ToString();
+            EDSMClass edsm = new EDSMClass();
+            if (!edsm.ShowSystemInEDSM(sysName)) LogTextHighlight("System could not be found - has not been synched or EDSM is unavailable" + Environment.NewLine);
+
+            this.Cursor = Cursors.Default;
+        }
+        
     }
 }

@@ -5,178 +5,291 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace EDDiscovery2.EDSM
-{
-    public delegate void EDSMNewSystemEventHandler(object source);
-
-
+{  
     public class EDSMSync
     {
         Thread ThreadEDSMSync;
         bool running = false;
         bool Exit = false;
+        bool _syncTo = false;
+        bool _syncFrom = false;
+        int _defmapcolour = 0;
         private EDDiscoveryForm mainForm;
-        public event EDSMNewSystemEventHandler OnNewEDSMTravelLog;
+
+        public delegate void EDSMDownloadedSystems();         // used for sync from not supported yet.
+        public event EDSMDownloadedSystems OnDownloadedSystems;
 
         public EDSMSync(EDDiscoveryForm frm)
         {
             mainForm = frm;
         }
 
-        public bool StartSync()
+        public bool StartSync(EDSMClass edsm, bool syncto, bool syncfrom, int defmapcolour)
         {
             if (running) // Only start once.
                 return false;
+            _syncTo = syncto;
+            _syncFrom = syncfrom;
+            _defmapcolour = defmapcolour;
 
-            ThreadEDSMSync = new System.Threading.Thread(new System.Threading.ThreadStart(SyncThread));
+            ThreadEDSMSync = new System.Threading.Thread(new System.Threading.ParameterizedThreadStart(SyncThread));
             ThreadEDSMSync.Name = "EDSM Sync";
-            ThreadEDSMSync.Start();
+            ThreadEDSMSync.IsBackground = true;
+            ThreadEDSMSync.Start(edsm);
 
             return true;
         }
-
 
         public void StopSync()
         {
             Exit = true;
         }
 
-        private void SyncThread()
+        private void SyncThread(object _edsm)
         {
+            EDSMClass edsm = (EDSMClass)_edsm;
             running = true;
-            Sync();
+            Sync(edsm);
             running = false;
         }
 
-
-        public void Sync()
+        private void Sync(EDSMClass edsm)
         {
             try
             {
-                SQLiteDBClass db = new SQLiteDBClass();
-                EDSMClass edsm = new EDSMClass();
+                mainForm.LogLine("EDSM sync begin");
 
-                edsm.apiKey = db.GetSettingString("EDSMApiKey", "");
-                edsm.commanderName = db.GetSettingString("CommanderName", "");
+                List<HistoryEntry> hlfsdunsyncedlist = mainForm.history.FilterByNotEDSMSyncedAndFSD;        // first entry is oldest
 
-                //string comments =  edsm.GetComments(new DateTime(2015, 1, 1));
-                List<SystemPosition> log;
-                int ret = edsm.GetLogs(new DateTime(2011, 1, 1), out log);
-
-                if (log == null)
-                    log = new List<SystemPosition>();
-
-                // Send Unsynced system to EDSM.
-
-                List<SystemPosition> systems = (from s in mainForm.visitedSystems where s.vs !=null && s.vs.EDSM_sync == false select s).ToList<SystemPosition>();
-                mainForm.LogLine("EDSM: Sending" +  systems.Count.ToString() + " flightlog entries", Color.Black);
-                foreach (var system in systems)
+                if ( _syncTo && hlfsdunsyncedlist.Count > 0 )                   // send systems to edsm (verified with dates, 29/9/2016, utc throughout)
                 {
-                    string json = null;
+                    DateTime utcmin = hlfsdunsyncedlist[0].EventTimeUTC.AddDays(-1);        // 1 days for margin ;-)  only get them back to this date for speed..
 
-                    if (Exit)
-                    {
-                        running = false;
-                        return;
-                    }
+                    mainForm.LogLine("EDSM: Sending " + hlfsdunsyncedlist.Count.ToString() + " flightlog entries");
 
-                    if (system.vs != null && system.vs.EDSM_sync == false)
+                    List<HistoryEntry> edsmsystemlog = null;
+                    edsm.GetLogs(utcmin, out edsmsystemlog);        // always returns a log, time is in UTC as per HistoryEntry and JournalEntry
+
+                    int edsmsystemssent = 0;
+
+                    foreach (var he in hlfsdunsyncedlist)
                     {
-                        // check if it exist in EDSM
-                        SystemPosition ps2 = (from c in log where c.Name == system.Name && c.time.Ticks == system.time.Ticks select c).FirstOrDefault<SystemPosition>();
-                        if (ps2 != null)
+                        if (Exit)
                         {
-                            system.vs.EDSM_sync = true;
-                            system.vs.Update();
+                            running = false;
+                            return;
+                        }
 
+                        HistoryEntry ps2 = (from c in edsmsystemlog where c.System.name == he.System.name && c.EventTimeUTC.Ticks == he.EventTimeUTC.Ticks select c).FirstOrDefault();
+
+                        if (ps2 != null)                // it did, just make sure EDSM sync flag is set..
+                        {
+                            he.SetEdsmSync();
                         }
                         else
-                            json = edsm.SetLog(system.Name, system.time);
-
-                        if (json != null)
                         {
-                            JObject msg = (JObject)JObject.Parse(json);
+                            string errmsg;              // (verified with EDSM 29/9/2016)
 
-                            int msgnum = msg["msgnum"].Value<int>();
-                            string msgstr = msg["msg"].Value<string>();
+                                                        // it converts to UTC inside the function, supply local for now
+                            if ( edsm.SendTravelLog(he.System.name, he.EventTimeUTC, he.System.HasCoordinate && !he.IsStarPosFromEDSM, he.System.x, he.System.y, he.System.z, out errmsg) )
+                                he.SetEdsmSync();
 
+                            if (errmsg.Length > 0)
+                                mainForm.LogLine(errmsg);
 
-                            if (msgnum == 100 || msgnum == 401 || msgnum == 402 || msgnum == 403)
-                            {
-                                if (msgnum == 100)
-                                    System.Diagnostics.Trace.WriteLine("New");
-
-                                system.vs.EDSM_sync = true;
-                                system.vs.Update();
-                            }
-                            else
-                            {
-                                mainForm.LogLine("EDSM sync ERROR:" + msgnum.ToString() +":" + msgstr, Color.Red);
-                                System.Diagnostics.Trace.WriteLine("Error sync:" + msgnum.ToString() + " : " + system.Name);
-                                break;
-                            }
-
-
+                            edsmsystemssent++;
                         }
                     }
+
+                    mainForm.LogLine(string.Format("EDSM Systems sent {0}", edsmsystemssent));
                 }
 
-                TravelLogUnit tlu = null;
+                // TBD Comments to edsm?
 
-                // Check for new systems from EDSM
-                bool newsystem = false;
-                int defaultColour = db.GetSettingInt("DefaultMap", Color.Red.ToArgb());
-                foreach (var system in log)
+                if ( _syncFrom )                                                            // Verified ok with time 29/9/2016
                 {
-                    SystemPosition ps2 = (from c in mainForm.visitedSystems where c.Name == system.Name && c.time.Ticks == system.time.Ticks select c).FirstOrDefault<SystemPosition>();
-                    if (ps2 == null)  // Add to local DB...
+                    var json = edsm.GetComments(new DateTime(2011, 1, 1));
+
+                    if (json != null)
                     {
-                        if (tlu == null) // If we dontt have a travellogunit yet then create it. 
+                        JObject msg = JObject.Parse(json);
+                        int msgnr = msg["msgnum"].Value<int>();
+
+                        JArray comments = (JArray)msg["comments"];
+                        if (comments != null)
                         {
-                            tlu = new TravelLogUnit();
+                            int commentsadded = 0;
 
-                            tlu.type = 2;  // EDSM
-                            tlu.Path = "http://www.edsm.net/api-logs-v1/get-logs";
-                            tlu.Name = "EDSM-" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                            tlu.Size = 0;
+                            foreach (JObject jo in comments)
+                            {
+                                string name = jo["system"].Value<string>();
+                                string note = jo["comment"].Value<string>();
+                                string utctime = jo["lastUpdate"].Value<string>();
+                                int edsmid = 0;
 
-                            tlu.Add();  // Add to Database
+                                if (!Int32.TryParse(JSONHelper.GetStringDef(jo["systemId"], "0"), out edsmid))
+                                    edsmid = 0;
+
+                                DateTime localtime = DateTime.ParseExact(utctime, "yyyy-MM-dd HH:mm:ss", 
+                                            CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToLocalTime();
+
+                                SystemNoteClass curnote = SystemNoteClass.GetNoteOnSystem(name, edsmid);
+
+                                if (curnote != null)
+                                {
+                                                                                // curnote uses local time to store
+                                    if (localtime.Ticks > curnote.Time.Ticks)   // if newer, add on (verified with EDSM 29/9/2016)
+                                    {
+                                        curnote.Note += ". EDSM: " + note;
+                                        curnote.Time = localtime;
+                                        curnote.EdsmId = edsmid;
+                                        curnote.Update();
+                                        commentsadded++;
+                                    }
+                                }
+                                else
+                                {
+                                    curnote = new SystemNoteClass();
+                                    curnote.Note = note;
+                                    curnote.Time = localtime;
+                                    curnote.Name = name;
+                                    curnote.Journalid = 0;
+                                    curnote.EdsmId = edsmid;
+                                    curnote.Add();
+                                    commentsadded++;
+                                }
+                            }
+
+                            mainForm.LogLine(string.Format("EDSM Comments downloaded/updated {0}", commentsadded));
                         }
-
-                        VisitedSystemsClass vs = new VisitedSystemsClass();
-
-                        vs.Source = tlu.id;
-                        vs.Unit = tlu.Name;
-
-                        vs.Name = system.Name;
-                        vs.Time = system.time;
-                        vs.MapColour = defaultColour;
-                        vs.EDSM_sync = true;
-                        
-
-                        vs.Add();  // Add to DB;
-                        System.Diagnostics.Trace.WriteLine("New from EDSM");
-                        newsystem = true;
-                        
                     }
                 }
-                mainForm.LogLine("EDSM sync Done", Color.Black);
 
-                if (newsystem)
-                    OnNewEDSMTravelLog(this);
+                if (_syncFrom )     // verified after struggle 29/9/2016
+                {
+                    List<HistoryEntry> edsmsystemlog = null;
+                    edsm.GetLogs(new DateTime(2011, 1, 1), out edsmsystemlog);        // get the full list of systems
+                    edsmsystemlog = edsmsystemlog.OrderBy(s => s.EventTimeUTC).ToList();
+
+                    List<HistoryEntry> hlfsdlist = mainForm.history.FilterByTravel.Where(h => h.IsLocOrJump).OrderBy(h => h.EventTimeUTC).ToList();  // FSD jumps only
+                    
+                    List<HistoryEntry> toadd = new List<HistoryEntry>();
+
+                    int previdx = -1;
+                    foreach (HistoryEntry he in edsmsystemlog)      // find out list of ones not present
+                    {
+                        int index = hlfsdlist.FindIndex(x => x.System.name.Equals(he.System.name, StringComparison.InvariantCultureIgnoreCase) && x.EventTimeUTC.Ticks == he.EventTimeUTC.Ticks);
+
+                        if (index < 0)
+                        {
+                            // Look for any entries where DST may have thrown off the time
+                            foreach (var vi in hlfsdlist.Select((v,i) => new {v = v, i = i}).Where(vi => vi.v.System.name.Equals(he.System.name, StringComparison.InvariantCultureIgnoreCase)))
+                            {
+                                if (vi.i > previdx)
+                                {
+                                    double hdiff = vi.v.EventTimeUTC.Subtract(he.EventTimeUTC).TotalHours;
+                                    if (hdiff >= -2 && hdiff <= 2 && hdiff == Math.Floor(hdiff))
+                                    {
+                                        if (vi.v.System.id_edsm <= 0)
+                                        {
+                                            vi.v.System.id_edsm = 0;
+                                            mainForm.history.FillEDSM(vi.v);
+                                        }
+
+                                        if (vi.v.System.id_edsm <= 0 || vi.v.System.id_edsm == he.System.id_edsm)
+                                        {
+                                            index = vi.i;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (index < 0)
+                        {
+                            toadd.Add(he);
+                        }
+                        else
+                        {
+                            previdx = index;
+                        }
+                    }
+
+                    if ( toadd.Count >0 )  // if we have any, we can add 
+                    {
+                        TravelLogUnit tlu = new TravelLogUnit();    // need a tlu for it
+                        tlu.type = 2;  // EDSM
+                        tlu.Name = "EDSM-" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                        tlu.Size = 0;
+                        tlu.Path = "EDSM";
+                        tlu.CommanderId = EDDiscoveryForm.EDDConfig.CurrentCommander.Nr;
+                        tlu.Add();  // Add to Database
+
+                        using (SQLiteConnectionUser cn = new SQLiteConnectionUser(utc: true))
+                        {
+                            foreach (HistoryEntry he in toadd)
+                            {
+                                EDDiscovery.EliteDangerous.JournalEntry je =
+                                    EDDiscovery.EliteDangerous.JournalEntry.CreateFSDJournalEntry(tlu.id, tlu.CommanderId.Value, he.EventTimeUTC,
+                                                                                                  he.System.name, he.System.x, he.System.y, he.System.z,
+                                                                                                  _defmapcolour, (int)EDDiscovery.EliteDangerous.SyncFlags.EDSM);
+
+                                System.Diagnostics.Trace.WriteLine(string.Format("Add {0} {1}", je.EventTimeUTC, he.System.name));
+                                je.Add(cn);
+                            }
+                        }
+
+                        if (OnDownloadedSystems != null)
+                            OnDownloadedSystems();
+
+                        mainForm.LogLine(string.Format("EDSM downloaded {0} systems", toadd.Count));
+                    }
+                }
+
+                mainForm.LogLine("EDSM sync Done");
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.WriteLine("Exception ex:" + ex.Message);
-                mainForm.LogLine("EDSM sync Exception " + ex.Message, Color.Red);
+                mainForm.LogLineHighlight("EDSM sync Exception " + ex.Message);
             }
-
         }
 
+        public static void SendTravelLog(HistoryEntry he) // (verified with EDSM 29/9/2016, seen UTC time being sent, and same UTC time on ESDM).
+        {
+            EDSMClass edsm = new EDSMClass();
+
+            if (!edsm.IsApiKeySet)
+                return;
+
+            string errmsg;
+            Task taskEDSM = Task.Factory.StartNew(() =>
+            {                                                   // LOCAL time, there is a UTC converter inside this call
+                if (edsm.SendTravelLog(he.System.name, he.EventTimeUTC, he.System.HasCoordinate, he.System.x, he.System.y, he.System.z, out errmsg))
+                    he.SetEdsmSync();
+            });
+        }
+
+        public static void SendComments(string star , string note, long edsmid = 0) // (verified with EDSM 29/9/2016)
+        {
+            EDSMClass edsm = new EDSMClass();
+
+            if (!edsm.IsApiKeySet)
+                return;
+
+            Task taskEDSM = Task.Factory.StartNew(() =>
+            {
+                edsm.SetComment(star, note, edsmid);
+            });
+        }
 
     }
 }
