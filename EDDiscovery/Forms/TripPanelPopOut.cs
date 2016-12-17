@@ -15,12 +15,15 @@ namespace EDDiscovery.Forms
 {
     public partial class TripPanelPopOut : Form
     {
+        static String TITLE = "Trip panel";
 
         public bool IsFormClosed { get; set; } = false;
         private Timer autofade = new Timer();
         private Color themeColour;
         private Color transparentkey = Color.Red;
         private static EDDiscoveryForm _discoveryform;
+        private Color defaultColour;
+        private Color warningColour = Color.Orange;
 
         public void SetGripperColour(Color grip)
         {
@@ -118,7 +121,7 @@ namespace EDDiscovery.Forms
             UpdateEventsOnControls(this);
             this.BackColor = transparentkey;
             this.TransparencyKey = transparentkey;
-
+            this.ContextMenuStrip = contextMenuStrip1;
             this.ShowInTaskbar = false;
             TopMost = true;
 
@@ -138,7 +141,7 @@ namespace EDDiscovery.Forms
             //   dpEDSM.Size = new Size(100, vsize - 6);
 
             //..  FontSel(vsc.Columns[2].DefaultCellStyle.Font, vsc.Font), panel_grip.ForeColor
-
+            defaultColour =  lblOutput.ForeColor;
 
             panel_grip.Visible = false;
         }
@@ -205,6 +208,7 @@ namespace EDDiscovery.Forms
         public const int HT_CAPTION = 0x2;
         public const int WM_NCL_RESIZE = 0x112;
         public const int HT_RESIZE = 61448;
+        private HistoryEntry lastHE;
 
         private IntPtr SendMessage(int msg, IntPtr wparam, IntPtr lparam)
         {
@@ -223,39 +227,45 @@ namespace EDDiscovery.Forms
                 SendMessage(WM_NCL_RESIZE, (IntPtr)HT_RESIZE, IntPtr.Zero);
             }
         }
-
+        
         internal void displayLastFSD(HistoryEntry he)
         {
             if (he == null)
                 return;
+            lastHE = he;
             String output = "";
             output += " distance " + he.TravelledDistance.ToString("0.0") + ((he.TravelledMissingjump > 0) ? " LY (*)" : " LY");
             output += " time " + he.TravelledSeconds;
             HistoryEntry lastFuelScoop = _discoveryform.history.GetLastFuelScoop;
             if (lastFuelScoop!=null && lastFuelScoop.FuelTotal > 0)
             {
-                if ((he.FuelLevel / lastFuelScoop.FuelTotal) < 0.25)
-                    output += " fuel < 25%";
+                double tankSize = SQLiteDBClass.GetSettingDouble("TripPopOutTankSize", 32);
+                double tankWarning = SQLiteDBClass.GetSettingDouble("TripPopOutTankWarning", 25);
+                if ((he.FuelLevel / tankSize) < (tankWarning / 100.0))
+                {
+                    output += String.Format(" fuel < {0}%", tankWarning.ToString("0.0"));
+                    lblOutput.ForeColor = warningColour;
+                }
                 else
-                    output += " fuel " + String.Format("{0}/{1}", he.FuelLevel.ToString("0.0"), lastFuelScoop.FuelTotal.ToString("0.0"));
+                {
+                    output += " fuel " + String.Format("{0}/{1}", he.FuelLevel.ToString("0.0"), tankSize.ToString("0.0"));
+                    lblOutput.ForeColor = defaultColour;
+                }
             }
             lblOutput.Text = output;
             dpEDSM.Name = he.System.name;
 
             lblSystemName.Text = he.System.name;
 
-            //TODO: JDT - Doesnt quite work the way I wanted it too
-
-          //  EDSMClass edsm = new EDSMClass();
-        //    if (edsm.GetUrlToEDSMSystem(he.System.name).Length > 0)
-          //  {
-          //      lblSystemName.Text += ", system known to edsm";
-          //  }
-           // else
-           // {
-            //    lblSystemName.Text += ", system unknown to edsm";
-           // }
-
+            EDSMClass edsm = new EDSMClass();
+            if (edsm.GetUrlToEDSMSystem(he.System.name).Length > 0)
+            {
+                lblSystemName.Text += ", system known to edsm";
+            }
+            else
+            {
+                lblSystemName.Text += ", system unknown to edsm";
+            }
         }
 
         public void EDSM_Click(object sender, EventArgs e)
@@ -294,12 +304,67 @@ namespace EDDiscovery.Forms
             }
             _discoveryform.RefreshHistoryAsync();
         }
-        //        public event EventHandler GotoEDSM;
 
-        //  private void buttonEDSM_Click(object sender, EventArgs e)
-        //  {
-        //      GotoEDSM(this, null);
-        //
-        // }
+         static class Prompt
+        {
+            public static string ShowDialog(string text,String defaultValue, string caption)
+            {
+                Form prompt = new Form()
+                {
+                    Width = 500,
+                    Height = 200,
+                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                    Text = caption,
+                    StartPosition = FormStartPosition.CenterScreen
+                };
+                Label textLabel = new Label() { Left = 50, Top = 20, Text = text };
+                TextBox textBox = new TextBox() { Left = 50, Top = 50, Width = 400 };
+                textBox.Text = defaultValue;
+                Button confirmation = new Button() { Text = "Ok", Left = 245, Width = 100, Top = 70, DialogResult = DialogResult.OK };
+                Button cancel = new Button() { Text = "Cancel", Left = 350, Width = 100, Top = 70, DialogResult = DialogResult.Cancel };
+                confirmation.Click += (sender, e) => { prompt.Close(); };
+                cancel.Click += (sender, e) => { prompt.Close(); };
+                prompt.Controls.Add(textBox);
+                prompt.Controls.Add(confirmation);
+                prompt.Controls.Add(cancel);
+                prompt.Controls.Add(textLabel);
+                prompt.AcceptButton = confirmation;
+
+                return prompt.ShowDialog() == DialogResult.OK ? textBox.Text : null;
+            }
+        }
+
+        private void setFuelTankToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var tankSize = SQLiteDBClass.GetSettingDouble("TripPopOutTankSize", 32.0);
+            string promptValue = Prompt.ShowDialog("Set fuel tank size", "" + tankSize, TITLE);
+            double value = 0;
+            if (promptValue != null && double.TryParse(promptValue, out value))
+            {
+                SQLiteDBClass.PutSettingDouble("TripPopOutTankSize", value);
+                displayLastFSD(lastHE);
+            }
+            else
+            {
+                MessageBox.Show("Please enter a numeric value", TITLE);
+            }
+        }
+
+        private void setFuelWarningToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var tankWarning = SQLiteDBClass.GetSettingDouble("TripPopOutTankWarning", 25.0);
+            string promptValue = Prompt.ShowDialog("Set fuel tank warning percentage","" + tankWarning, TITLE);
+            double value = 0;
+            if (promptValue != null && double.TryParse(promptValue, out value)
+                && value>=0 && value<=100)
+            {
+                SQLiteDBClass.PutSettingDouble("TripPopOutTankWarning", value);
+                displayLastFSD(lastHE);
+            }
+            else
+            {
+                MessageBox.Show("Please enter a numeric value between 1-100", TITLE);
+            }
+        }
     }
 }
