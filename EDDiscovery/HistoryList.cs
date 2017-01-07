@@ -1,5 +1,6 @@
 ﻿using EDDiscovery.DB;
 using EDDiscovery.EliteDangerous;
+using EDDiscovery.EliteDangerous.JournalEvents;
 using EDDiscovery2;
 using EDDiscovery2.DB;
 using OpenTK;
@@ -62,6 +63,8 @@ namespace EDDiscovery
 
         // Calculated values, not from JE
 
+        public SystemNoteClass snc;     // system note class found attached to this entry
+
         private double travelled_distance;  // start/stop distance and time computation
         public double TravelledDistance { get { return travelled_distance; } }
 
@@ -69,15 +72,12 @@ namespace EDDiscovery
         public TimeSpan TravelledSeconds { get { return travelled_seconds; } }
 
         bool travelling;
+        public bool isTravelling { get { return travelling; } }
+
         int travelled_missingjump;
         public int TravelledMissingjump { get { return travelled_missingjump; } }
         public int Travelledjumps { get { return travelled_jumps; } }
         int travelled_jumps;
-
-        private double fuelTotal = 0.0;
-        public double FuelTotal { get { return fuelTotal; } }
-        private double fuelLevel;
-        public double FuelLevel { get { return fuelLevel; } set { fuelLevel = value; } }
 
         MaterialCommoditiesList materialscommodities;
 
@@ -130,7 +130,7 @@ namespace EDDiscovery
                     newsys = new SystemClass(jl.StarSystem, jl.StarPos.X, jl.StarPos.Y, jl.StarPos.Z);
                     newsys.id_edsm = jl.EdsmID < 0 ? 0 : jl.EdsmID;       // pass across the EDSMID for the lazy load process.
 
-                    if (jfsd != null && jfsd.JumpDist <= 0 && isys.HasCoordinate)     // if we don't have a jump distance (pre 2.2) but the last sys does, we can compute
+                    if (jfsd != null && jfsd.JumpDist <= 0 && isys.HasCoordinate)     // if we don't have a jump distance (pre 2.2) but the last sys does have pos, we can compute distance and update entry
                     {
                         jfsd.JumpDist = SystemClass.Distance(isys, newsys); // fill it out here
                         journalupdate = true;
@@ -201,17 +201,6 @@ namespace EDDiscovery
                 IsStarPosFromEDSM = starposfromedsm,
                 Commander = cmdr ?? EDDConfig.Instance.Commander(je.CommanderId)
             };
-
-            if (je.EventTypeID == EliteDangerous.JournalTypeEnum.FuelScoop)
-            {
-                EDDiscovery.EliteDangerous.JournalEvents.JournalFuelScoop fs = je as EDDiscovery.EliteDangerous.JournalEvents.JournalFuelScoop;
-                he.fuelTotal = fs.Total;
-            }
-            else if (je.EventTypeID == EliteDangerous.JournalTypeEnum.FSDJump)
-            {
-                EDDiscovery.EliteDangerous.JournalEvents.JournalFSDJump fj = je as EDDiscovery.EliteDangerous.JournalEvents.JournalFSDJump;
-                he.fuelLevel = fj.FuelLevel;
-            }
 
             if (prev != null && prev.travelling)      // if we are travelling..
             {
@@ -309,9 +298,25 @@ namespace EDDiscovery
             return he;
         }
 
-        public void ProcessWithUserDb(EliteDangerous.JournalEntry je, HistoryEntry prev, SQLiteConnectionUser conn )      // called after above with a USER connection
+        public void ProcessWithUserDb(EliteDangerous.JournalEntry je, HistoryEntry prev, HistoryList hl , SQLiteConnectionUser conn )      // called after above with a USER connection
         {
             materialscommodities = MaterialCommoditiesList.Process(je, prev?.materialscommodities, conn, EDDiscoveryForm.EDDConfig.ClearMaterials, EDDiscoveryForm.EDDConfig.ClearCommodities);
+
+            snc = SystemNoteClass.GetNoteOnJournalEntry(Journalid);
+
+            if (snc == null && IsFSDJump)
+            {
+                snc = SystemNoteClass.GetNoteOnSystem(System.name, System.id_edsm);
+
+                if ( snc != null )      // if found..
+                {
+                    if ( System.id_edsm > 0 && snc.EdsmId <= 0 )    // if we have a system id, but snc not set, update it for next time.
+                    {
+                        snc.EdsmId = System.id_edsm;
+                        snc.Update(conn);
+                    }
+                }
+            }
         }
 
         #endregion
@@ -368,6 +373,38 @@ namespace EDDiscovery
         public bool IsJournalEventInEventFilter(string eventstr)
         {
             return eventstr == "All" || IsJournalEventInEventFilter(eventstr.Split(';'));
+        }
+
+        public bool UpdateSystemNote(string txt)
+        {
+            if ((snc == null && txt.Length > 0) || (snc != null && !snc.Note.Equals(txt))) // if no system note, and text,  or system not is not text
+            {
+                if (snc != null && (snc.Journalid == Journalid || snc.Journalid == 0 || (snc.Name.Equals(System.name, StringComparison.InvariantCultureIgnoreCase) && snc.EdsmId <= 0) || (snc.EdsmId > 0 && snc.EdsmId == System.id_edsm)))           // already there, update
+                {
+                    snc.Note = txt;
+                    snc.Time = DateTime.Now;
+                    snc.Name = (IsFSDJump) ? System.name : "";
+                    snc.Journalid = Journalid;
+                    snc.EdsmId = IsFSDJump ? System.id_edsm : 0;
+                    snc.Update();
+                }
+                else
+                {
+                    snc = new SystemNoteClass();
+                    snc.Note = txt;
+                    snc.Time = DateTime.Now;
+                    snc.Name = IsFSDJump ? System.name : "";
+                    snc.Journalid = Journalid;
+                    snc.EdsmId = IsFSDJump ? System.id_edsm : 0;
+                    snc.Add();
+                }
+
+                Debug.WriteLine("Store note {0} {1}", snc.Name, snc.EdsmId);
+
+                return true;
+            }
+
+            return false;
         }
     }
 
@@ -512,6 +549,24 @@ namespace EDDiscovery
             }
         }
 
+
+        public HistoryEntry GetLastRefuel
+        {
+            get
+            {
+                return historylist.FindLast(x => x.journalEntry.EventTypeID==JournalTypeEnum.RefuelAll
+                    || x.journalEntry.EventTypeID == JournalTypeEnum.RefuelPartial);
+            }
+        }
+        public HistoryEntry GetLastFSDOrFuelScoop
+        {
+            get
+            {
+                return historylist.FindLast(x => x.journalEntry.EventTypeID == JournalTypeEnum.FSDJump
+                    || x.journalEntry.EventTypeID == JournalTypeEnum.FuelScoop);
+            }
+        }
+
         public HistoryEntry GetLastWithPosition
         {
             get
@@ -547,6 +602,73 @@ namespace EDDiscovery
             return (from s in historylist where s.IsFSDJump && s.EventTimeUTC>=tme select s).Count();
         }
 
+        public int GetFSDJumps(DateTime start, DateTime to)
+        {
+            return (from s in historylist where s.IsFSDJump && s.EventTimeLocal >= start && s.EventTimeLocal<to  select s).Count();
+        }
+
+        public int GetDocked(DateTime start, DateTime to)
+        {
+            return (from s in historylist where s.EntryType == JournalTypeEnum.Docked && s.EventTimeLocal >= start && s.EventTimeLocal < to select s).Count();
+        }
+
+        public int GetJetConeBoost(DateTime start, DateTime to)
+        {
+            return (from s in historylist where s.EntryType == JournalTypeEnum.JetConeBoost && s.EventTimeLocal >= start && s.EventTimeLocal < to select s).Count();
+        }
+
+        public int GetFSDBoostUsed(DateTime start, DateTime to)
+        {
+            var list = (from s in historylist where s.EntryType == JournalTypeEnum.FSDJump && s.EventTimeLocal >= start && s.EventTimeLocal   < to select s.journalEntry as JournalFSDJump).ToList<JournalFSDJump>();
+            return (from s in list where s.BoostUsed == true select s  ).Count();
+        }
+
+
+
+        public int GetTouchDown(DateTime start, DateTime to)
+        {
+            return (from s in historylist where s.EntryType == JournalTypeEnum.Touchdown && s.EventTimeLocal >= start && s.EventTimeLocal < to select s).Count();
+        }
+
+        public int GetHeatWarning(DateTime start, DateTime to)
+        {
+            return (from s in historylist where s.EntryType == JournalTypeEnum.HeatWarning && s.EventTimeLocal >= start && s.EventTimeLocal < to select s).Count();
+        }
+
+
+        public int GetHeatDamage(DateTime start, DateTime to)
+        {
+            return (from s in historylist where s.EntryType == JournalTypeEnum.HeatDamage && s.EventTimeLocal >= start && s.EventTimeLocal < to select s).Count();
+        }
+
+        public int GetFuelScooped(DateTime start, DateTime to)
+        {
+            return (from s in historylist where s.EntryType == JournalTypeEnum.FuelScoop && s.EventTimeLocal >= start && s.EventTimeLocal < to select s).Count();
+        }
+
+        public double GetFuelScoopedTons(DateTime start, DateTime to)
+        {
+             var list = (from s in historylist where s.EntryType == JournalTypeEnum.FuelScoop && s.EventTimeLocal >= start && s.EventTimeLocal < to select s.journalEntry as JournalFuelScoop).ToList<JournalFuelScoop>();
+
+            return (from s in list select s.Scooped).Sum();
+        }
+
+        public double GetTraveledLy(DateTime start, DateTime to)
+        {
+            var list = (from s in historylist where s.EntryType == JournalTypeEnum.FSDJump && s.EventTimeLocal >= start && s.EventTimeLocal < to select s.journalEntry as JournalFSDJump).ToList<JournalFSDJump>();
+
+            return (from s in list select s.JumpDist).Sum();
+        }
+
+
+        public List<JournalScan> GetScanList(DateTime start, DateTime to)
+        {
+            var list = (from s in historylist where s.EntryType == JournalTypeEnum.Scan && s.EventTimeLocal >= start && s.EventTimeLocal < to select s.journalEntry as JournalScan).ToList<JournalScan>();
+            return list;
+        }
+
+
+
         public int GetFSDJumpsBeforeUTC(DateTime utc)
         {
             return (from s in historylist where s.IsFSDJump && s.EventTimeLocal < utc select s).Count();
@@ -580,11 +702,11 @@ namespace EDDiscovery
 
             foreach (Tuple<HistoryEntry, SystemClass> he in updatesystems)
             {
-                FillEDSM(he.Item1, edsmsys: he.Item2, findsys: false);
+                FillEDSM(he.Item1, edsmsys: he.Item2);  // fill, we already have an EDSM system to use
             }
         }
 
-        public SystemClass FindEDSM(HistoryEntry syspos, SQLiteConnectionSystem conn = null, bool reload = false)
+        private SystemClass FindEDSM(HistoryEntry syspos, SQLiteConnectionSystem conn = null, bool reload = false)
         {
             if (syspos.System.status == SystemStatusEnum.EDSC || (!reload && syspos.System.id_edsm == -1))  // if set already, or we tried and failed..
                 return null;
@@ -610,7 +732,7 @@ namespace EDDiscovery
             }
         }
 
-        public void FillEDSM(HistoryEntry syspos, SystemClass edsmsys = null, bool findsys = true, bool reload = false)       // call to fill in ESDM data for entry, and also fills in all others pointing to the system object
+        public void FillEDSM(HistoryEntry syspos, SystemClass edsmsys = null, bool reload = false, SQLiteConnectionUser uconn = null )       // call to fill in ESDM data for entry, and also fills in all others pointing to the system object
         {
             if (syspos.System.status == SystemStatusEnum.EDSC || (!reload && syspos.System.id_edsm == -1) )  // if set already, or we tried and failed..
                 return;
@@ -623,7 +745,7 @@ namespace EDDiscovery
                     alsomatching.Add(he);
             }
 
-            if (findsys)
+            if (edsmsys==null)                              // if we found it externally, do not find again
                 edsmsys = FindEDSM(syspos, reload: reload);
 
             if (edsmsys != null)
@@ -634,7 +756,7 @@ namespace EDDiscovery
                     bool updatepos = (he.EntryType == EliteDangerous.JournalTypeEnum.FSDJump || he.EntryType == EliteDangerous.JournalTypeEnum.Location) && !syspos.System.HasCoordinate && edsmsys.HasCoordinate;
 
                     if (updatepos || updateedsmid)
-                        EliteDangerous.JournalEntry.UpdateEDSMIDPosJump(he.Journalid, edsmsys, updatepos, -1);  // update pos and edsmid, jdist not updated
+                        EliteDangerous.JournalEntry.UpdateEDSMIDPosJump(he.Journalid, edsmsys, updatepos, -1 , uconn);  // update pos and edsmid, jdist not updated
 
                     he.System = edsmsys;
                 }

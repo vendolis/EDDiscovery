@@ -77,6 +77,8 @@ namespace EDDiscovery
 
         public bool option_nowindowreposition { get; set; } = false;                             // Cmd line options
         public bool option_debugoptions { get; set; } = false;
+        public bool option_tracelog { get; set; } = false;
+        public bool option_fcexcept { get; set; } = false;
 
         public EDDiscovery2._3DMap.MapManager Map { get; private set; }
 
@@ -89,8 +91,10 @@ namespace EDDiscovery
         public event NewEntry OnNewEntry;
         public delegate void NewLogEntry(string txt, Color c);
         public event NewLogEntry OnNewLogEntry;
-
-        static public GalacticMapping galacticMapping;
+        public delegate void NewTarget();
+        public event NewTarget OnNewTarget;
+        
+        public GalacticMapping galacticMapping;
 
         public CancellationTokenSource CancellationTokenSource { get; private set; } = new CancellationTokenSource();
 
@@ -123,15 +127,6 @@ namespace EDDiscovery
 
         #region Initialisation
 
-        private class TraceLogWriter : TextWriter
-        {
-            public override Encoding Encoding { get { return Encoding.UTF8; } }
-            public override IFormatProvider FormatProvider { get { return CultureInfo.InvariantCulture; } }
-            public override void Write(string value) { Trace.Write(value); }
-            public override void WriteLine(string value) { Trace.WriteLine(value); }
-            public override void WriteLine() { Trace.WriteLine(""); }
-        }
-
         public EDDiscoveryForm()
         {
             InitializeComponent();
@@ -149,21 +144,13 @@ namespace EDDiscovery
                     Directory.CreateDirectory(logpath);
                 }
 
-                if (!Debugger.IsAttached)
+                if (!Debugger.IsAttached || option_tracelog)
                 {
-                    logname = Path.Combine(Tools.GetAppDataDirectory(), "Log", $"Trace_{DateTime.Now.ToString("yyyyMMddHHmmss")}.log");
-
-                    System.Diagnostics.Trace.AutoFlush = true;
-                    // Log trace events to the above file
-                    System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(logname));
-                    // Log unhandled exceptions
-                    AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
-                    // Log unhandled UI exceptions
-                    Application.ThreadException += Application_ThreadException;
-                    // Redirect console to trace
-                    Console.SetOut(new TraceLogWriter());
-                    // Log first-chance exceptions to help diagnose errors
-                    Register_FirstChanceException_Handler();
+                    TraceLog.LogFileWriterException += ex =>
+                    {
+                        LogLineHighlight($"Log Writer Exception: {ex}");
+                    };
+                    TraceLog.Init(option_fcexcept);
                 }
             }
             catch (Exception ex)
@@ -201,7 +188,7 @@ namespace EDDiscovery
 
             EdsmSync = new EDSMSync(this);
 
-            Map = new EDDiscovery2._3DMap.MapManager(option_nowindowreposition, travelHistoryControl1);
+            Map = new EDDiscovery2._3DMap.MapManager(option_nowindowreposition, this);
 
             journalmonitor = new EliteDangerous.EDJournalClass();
 
@@ -229,102 +216,6 @@ namespace EDDiscovery
             }
         }
 
-        // We can't prevent an unhandled exception from killing the application.
-        // See https://blog.codinghorror.com/improved-unhandled-exception-behavior-in-net-20/
-        // Log the exception info if we can, and ask the user to report it.
-        [System.Runtime.ExceptionServices.HandleProcessCorruptedStateExceptions]
-        [System.Security.SecurityCritical]
-        [System.Runtime.ConstrainedExecution.ReliabilityContract(
-            System.Runtime.ConstrainedExecution.Consistency.WillNotCorruptState,
-            System.Runtime.ConstrainedExecution.Cer.Success)]
-        private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
-        {
-            try
-            {
-                System.Diagnostics.Trace.WriteLine($"\n==== UNHANDLED EXCEPTION ====\n{e.ExceptionObject.ToString()}\n==== cut ====");
-                MessageBox.Show($"There was an unhandled exception.\nPlease report this at https://github.com/EDDiscovery/EDDiscovery/issues and attach {logname}\nException: {e.ExceptionObject.ToString()}\n\nThis application must now close", "Unhandled Exception");
-            }
-            catch
-            {
-            }
-
-            Environment.Exit(1);
-        }
-
-        // Handling a ThreadException leaves the application in an undefined state.
-        // See https://msdn.microsoft.com/en-us/library/system.windows.forms.application.threadexception(v=vs.100).aspx
-        // Log the exception, ask the user to report it, and exit.
-        private void Application_ThreadException(object sender, ThreadExceptionEventArgs e)
-        {
-            try
-            {
-                System.Diagnostics.Trace.WriteLine($"\n==== UNHANDLED EXCEPTION ON {Thread.CurrentThread.Name} THREAD ====\n{e.Exception.ToString()}\n==== cut ====");
-                MessageBox.Show($"There was an unhandled exception.\nPlease report this at https://github.com/EDDiscovery/EDDiscovery/issues and attach {logname}\nException: {e.Exception.Message}\n{e.Exception.StackTrace}\n\nThis application must now close", "Unhandled Exception");
-            }
-            catch
-            {
-            }
-
-            Environment.Exit(1);
-        }
-
-        // Mono does not implement AppDomain.CurrentDomain.FirstChanceException
-        private static void Register_FirstChanceException_Handler()
-        {
-            try
-            {
-                Type adtype = AppDomain.CurrentDomain.GetType();
-                EventInfo fcexevent = adtype.GetEvent("FirstChanceException");
-                if (fcexevent != null)
-                {
-                    fcexevent.AddEventHandler(AppDomain.CurrentDomain, new EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs>(CurrentDomain_FirstChanceException));
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        // Log exceptions were they occur so we can try to  some
-        // hard to debug issues.
-        private static void CurrentDomain_FirstChanceException(object sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
-        {
-            // Ignore HTTP NotModified exceptions
-            if (e.Exception is System.Net.WebException)
-            {
-                var webex = (WebException)e.Exception;
-                if (webex.Response != null && webex.Response is HttpWebResponse)
-                {
-                    var resp = (HttpWebResponse)webex.Response;
-                    if (resp.StatusCode == HttpStatusCode.NotModified)
-                    {
-                        return;
-                    }
-                }
-            }
-            // Ignore DLL Not Found exceptions from OpenTK
-            else if (e.Exception is DllNotFoundException && e.Exception.Source == "OpenTK")
-            {
-                return;
-            }
-
-            var trace = new StackTrace(1, true);
-
-            // Ignore first-chance exceptions in threads outside our code
-            bool ourcode = false;
-            foreach (var frame in trace.GetFrames())
-            {
-                if (frame.GetMethod().DeclaringType.Assembly == Assembly.GetExecutingAssembly())
-                {
-                    ourcode = true;
-                    break;
-                }
-            }
-
-            if (ourcode)
-                System.Diagnostics.Trace.WriteLine($"First chance exception: {e.Exception.Message}\n{trace.ToString()}");
-        }
-
         private void EDDiscoveryForm_Layout(object sender, LayoutEventArgs e)       // Manually position, could not get gripper under tab control with it sizing for the life of me
         {
         }
@@ -344,6 +235,8 @@ namespace EDDiscovery
             }
 
             option_debugoptions = parts.FindIndex(x => x.Equals("-Debug", StringComparison.InvariantCultureIgnoreCase)) != -1;
+            option_tracelog = parts.FindIndex(x => x.Equals("-TraceLog", StringComparison.InvariantCultureIgnoreCase)) != -1;
+            option_fcexcept = parts.FindIndex(x => x.Equals("-LogExceptions", StringComparison.InvariantCultureIgnoreCase)) != -1;
 
             if (parts.FindIndex(x => x.Equals("-EDSMBeta", StringComparison.InvariantCultureIgnoreCase)) != -1)
             {
@@ -496,18 +389,14 @@ namespace EDDiscovery
 
         private void PanelInfoNewRelease()
         {
-            panelInfo.BackColor = Color.Green;
-            labelPanelText.Text = "Download new release!";
-            panelInfo.Visible = true;
+            ShowInfoPanel("Download new release!", true, Color.Green);
         }
 
 
         private void InitFormControls()
         {
-            labelPanelText.Text = "Loading. Please wait!";
-            panelInfo.Visible = true;
-            panelInfo.BackColor = Color.Gold;
-
+            ShowInfoPanel("Loading. Please wait!", true, Color.Gold);
+            
             routeControl1.travelhistorycontrol1 = travelHistoryControl1;
         }
 
@@ -539,6 +428,11 @@ namespace EDDiscovery
                 this.CreateParams.Y = this.Top;
                 this.StartPosition = FormStartPosition.Manual;
 
+            }
+            else
+            {
+                var Max = SQLiteDBClass.GetSettingBool("FormMax", false);
+                if (Max) this.WindowState = FormWindowState.Maximized;
             }
 
             travelHistoryControl1.LoadLayoutSettings();
@@ -574,8 +468,6 @@ namespace EDDiscovery
 
             if (OnHistoryChange!=null)
                 OnHistoryChange(history);
-
-            TravelControl.RedrawSummary();
         }
 
 #endregion
@@ -798,10 +690,7 @@ namespace EDDiscovery
 
                 RefreshHistoryAsync();
 
-                DeleteOldLogFiles();
-
-
-                panelInfo.Visible = false;
+                ShowInfoPanel("", false);
 
                 checkInstallerTask = CheckForNewInstallerAsync();
 
@@ -1174,41 +1063,6 @@ namespace EDDiscovery
             }
         }
 
-        void DeleteOldLogFiles()
-        {
-            try
-            {
-                // Create a reference to the Log directory.
-                DirectoryInfo di = new DirectoryInfo(Path.Combine(Tools.GetAppDataDirectory(), "Log"));
-
-                Trace.WriteLine("Running logfile age check");
-                // Create an array representing the files in the current directory.
-                FileInfo[] fi = di.GetFiles("*.log");
-
-                System.Collections.IEnumerator myEnum = fi.GetEnumerator();
-
-                while (myEnum.MoveNext())
-                {
-                    FileInfo fiTemp = (FileInfo)(myEnum.Current);
-
-                    DateTime time = fiTemp.CreationTime;
-
-                    //Trace.WriteLine(String.Format("File {0}  time {1}", fiTemp.Name, __box(time)));
-
-                    TimeSpan maxage = new TimeSpan(30, 0, 0, 0);
-                    TimeSpan fileage = DateTime.Now - time;
-
-                    if (fileage > maxage)
-                    {
-                        Trace.WriteLine(String.Format("File {0} is older then maximum age. Removing file from Logs.", fiTemp.Name));
-                        fiTemp.Delete();
-                    }
-                }
-            }
-            catch
-            {
-            }
-        }
 
 #endregion
 
@@ -1245,6 +1099,7 @@ namespace EDDiscovery
         {
             settings.SaveSettings();
 
+            SQLiteDBClass.PutSettingBool("FormMax", this.WindowState == FormWindowState.Maximized);
             SQLiteDBClass.PutSettingInt("FormWidth", this.Width);
             SQLiteDBClass.PutSettingInt("FormHeight", this.Height);
             SQLiteDBClass.PutSettingInt("FormTop", this.Top);
@@ -1261,6 +1116,13 @@ namespace EDDiscovery
 
         public bool PendingClose { get { return safeClose != null; } }           // we want to close boys!
 
+        public void ShowInfoPanel(string message, bool visible, Color? backColour = null)
+        {
+            labelPanelText.Text = message;
+            panelInfo.Visible = visible;
+            if (backColour.HasValue) panelInfo.BackColor = backColour.Value;
+        }
+
         private void EDDiscoveryForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             if (safeClose == null)                  // so a close is a request now, and it launches a thread which cleans up the system..
@@ -1276,8 +1138,7 @@ namespace EDDiscovery
                 {
                     cancelDownloadMaps();
                 }
-                labelPanelText.Text = "Closing, please wait!";
-                panelInfo.Visible = true;
+                ShowInfoPanel("Closing, please wait!", true);
                 LogLineHighlight("Closing down, please wait..");
                 Console.WriteLine("Close.. safe close launched");
                 safeClose = new Thread(SafeClose) { Name = "Close Down", IsBackground = true };
@@ -1486,77 +1347,34 @@ namespace EDDiscovery
             Process.Start("https://discord.gg/0qIqfCQbziTWzsQu");
         }
 
-        protected override void WndProc(ref Message m)
+        private void showAllInTaskBarToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            // Compatibility movement for Mono
-            if (m.Msg == WM_LBUTTONDOWN && (int)m.WParam == 1 && !theme.WindowsFrame)
-            {
-                int x = unchecked((short)((uint)m.LParam & 0xFFFF));
-                int y = unchecked((short)((uint)m.LParam >> 16));
-                _window_dragMousePos = new Point(x, y);
-                _window_dragWindowPos = this.Location;
-                _window_dragging = true;
-                m.Result = IntPtr.Zero;
-                this.Capture = true;
-            }
-            else if (m.Msg == WM_MOUSEMOVE && (int)m.WParam == 1 && _window_dragging)
-            {
-                int x = unchecked((short)((uint)m.LParam & 0xFFFF));
-                int y = unchecked((short)((uint)m.LParam >> 16));
-                Point delta = new Point(x - _window_dragMousePos.X, y - _window_dragMousePos.Y);
-                _window_dragWindowPos = new Point(_window_dragWindowPos.X + delta.X, _window_dragWindowPos.Y + delta.Y);
-                this.Location = _window_dragWindowPos;
-                this.Update();
-                m.Result = IntPtr.Zero;
-            }
-            else if (m.Msg == WM_LBUTTONUP)
-            {
-                _window_dragging = false;
-                _window_dragMousePos = Point.Empty;
-                _window_dragWindowPos = Point.Empty;
-                m.Result = IntPtr.Zero;
-                this.Capture = false;
-            }
-            // Windows honours NCHITTEST; Mono does not
-            else if (m.Msg == WM_NCHITTEST)
-            {
-                base.WndProc(ref m);
-                //System.Diagnostics.Debug.WriteLine( Environment.TickCount + " Res " + ((int)m.Result));
-
-                if ((int)m.Result == HT_CLIENT)
-                {
-                    int x = unchecked((short)((uint)m.LParam & 0xFFFF));
-                    int y = unchecked((short)((uint)m.LParam >> 16));
-                    Point p = PointToClient(new Point(x, y));
-
-                    if (p.X > this.ClientSize.Width - statusStrip1.Height && p.Y > this.ClientSize.Height - statusStrip1.Height)
-                    {
-                        m.Result = (IntPtr)HT_BOTTOMRIGHT;
-                    }
-                    else if ( p.Y > this.ClientSize.Height - statusStrip1.Height )
-                    {
-                        m.Result = (IntPtr)HT_BOTTOM;
-                    }
-                    else if (p.X > this.ClientSize.Width - 5)       // 5 is generous.. really only a few pixels gets thru before the subwindows grabs them
-                    {
-                        m.Result = (IntPtr)HT_RIGHT;
-                    }
-                    else if (p.X < 5)
-                    {
-                        m.Result = (IntPtr)HT_LEFT;
-                    }
-                    else if (!theme.WindowsFrame)
-                    {
-                        m.Result = (IntPtr)HT_CAPTION;
-                    }
-                }
-            }
-            else
-            {
-                base.WndProc(ref m);
-            }
+            travelHistoryControl1.ShowAllPopOutsInTaskBar();
         }
-        
+
+        private void turnOffAllTransparencyToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            travelHistoryControl1.MakeAllPopoutsOpaque();
+        }
+
+        private void clearEDSMIDAssignedToAllRecordsForCurrentCommanderToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (MessageBox.Show("Confirm you wish to reset the assigned EDSM IDs to all the current commander history entries," + 
+                                " and clear all the assigned EDSM IDs in all your notes for all commanders\r\n\r\n" +
+                                "This will not change your history, but when you next refresh, it will try and reassign EDSM systems to " +
+                                "your history and notes.  Use only if you think that the assignment of EDSM systems to entries is grossly wrong," +
+                                "or notes are going missing\r\n" + 
+                                "\r\n" +
+                                "You can manually change one EDSM assigned system by right clicking on the travel history and selecting the option"
+                                , "WARNING", MessageBoxButtons.OKCancel) == DialogResult.OK)
+            {
+                EliteDangerous.JournalEntry.ClearEDSMID(EDDConfig.CurrentCommander.Nr);
+                SystemNoteClass.ClearEDSMID();
+            }
+
+        }
+
+
         private void paneleddiscovery_Click(object sender, EventArgs e)
         {
             AboutBox();
@@ -1569,40 +1387,16 @@ namespace EDDiscovery
 
         private void read21AndFormerLogFilesToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            adminToolStripMenuItem.DropDown.Close();
-            if (DisplayedCommander >= 0)
-            {
-                EDCommander cmdr = EDDConfig.ListOfCommanders.Find(c => c.Nr == DisplayedCommander);
-                if (cmdr != null)
-                {
-                    string netlogpath = cmdr.NetLogDir;
-                    FolderBrowserDialog dirdlg = new FolderBrowserDialog();
-                    if (netlogpath != null && Directory.Exists(netlogpath))
-                    {
-                        dirdlg.SelectedPath = netlogpath;
-                    }
-
-                    DialogResult dlgResult = dirdlg.ShowDialog();
-
-                    if (dlgResult == DialogResult.OK)
-                    {
-                        string logpath = dirdlg.SelectedPath;
-
-                        if (logpath != netlogpath)
-                        {
-                            cmdr.NetLogDir = logpath;
-                            EDDConfig.UpdateCommanders(new List<EDCommander> { cmdr });
-                        }
-
-                        //string logpath = "c:\\games\\edlaunch\\products\\elite-dangerous-64\\logs";
-                        RefreshHistoryAsync(netlogpath: logpath, forcenetlogreload: false, currentcmdr: cmdr.Nr);
-                    }
-                }
-            }
+            Read21Folders(false);
         }
 
         private void read21AndFormerLogFiles_forceReloadLogsToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            Read21Folders(true);
+        }
+
+        private void Read21Folders(bool force)
+        { 
             if (DisplayedCommander >= 0)
             {
                 EDCommander cmdr = EDDConfig.ListOfCommanders.Find(c => c.Nr == DisplayedCommander);
@@ -1624,11 +1418,11 @@ namespace EDDiscovery
                         if (logpath != netlogpath)
                         {
                             cmdr.NetLogDir = logpath;
-                            EDDConfig.UpdateCommanders(new List<EDCommander> { cmdr });
+                            EDDConfig.UpdateCommanders(new List<EDCommander> { cmdr }, true);
                         }
 
                         //string logpath = "c:\\games\\edlaunch\\products\\elite-dangerous-64\\logs";
-                        RefreshHistoryAsync(netlogpath: logpath, forcenetlogreload: true, currentcmdr: cmdr.Nr);
+                        RefreshHistoryAsync(netlogpath: logpath, forcenetlogreload: force, currentcmdr: cmdr.Nr);
                     }
                 }
             }
@@ -1713,6 +1507,95 @@ namespace EDDiscovery
             Map.Show();
             this.Cursor = Cursors.Default;
         }
+
+        private void sendUnsuncedEDDNEventsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            List<HistoryEntry> hlsyncunsyncedlist = history.FilterByScanNotEDDNSynced;        // first entry is oldest
+            EDDNSync.SendEDDNEvents(this, hlsyncunsyncedlist);
+        }
+
+        private void materialSearchToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            FindMaterialsForm frm = new FindMaterialsForm();
+
+            frm.Show(this);
+        }
+
+        #endregion
+
+        #region Window Control
+
+        protected override void WndProc(ref Message m)
+        {
+            // Compatibility movement for Mono
+            if (m.Msg == WM_LBUTTONDOWN && (int)m.WParam == 1 && !theme.WindowsFrame)
+            {
+                int x = unchecked((short)((uint)m.LParam & 0xFFFF));
+                int y = unchecked((short)((uint)m.LParam >> 16));
+                _window_dragMousePos = new Point(x, y);
+                _window_dragWindowPos = this.Location;
+                _window_dragging = true;
+                m.Result = IntPtr.Zero;
+                this.Capture = true;
+            }
+            else if (m.Msg == WM_MOUSEMOVE && (int)m.WParam == 1 && _window_dragging)
+            {
+                int x = unchecked((short)((uint)m.LParam & 0xFFFF));
+                int y = unchecked((short)((uint)m.LParam >> 16));
+                Point delta = new Point(x - _window_dragMousePos.X, y - _window_dragMousePos.Y);
+                _window_dragWindowPos = new Point(_window_dragWindowPos.X + delta.X, _window_dragWindowPos.Y + delta.Y);
+                this.Location = _window_dragWindowPos;
+                this.Update();
+                m.Result = IntPtr.Zero;
+            }
+            else if (m.Msg == WM_LBUTTONUP)
+            {
+                _window_dragging = false;
+                _window_dragMousePos = Point.Empty;
+                _window_dragWindowPos = Point.Empty;
+                m.Result = IntPtr.Zero;
+                this.Capture = false;
+            }
+            // Windows honours NCHITTEST; Mono does not
+            else if (m.Msg == WM_NCHITTEST)
+            {
+                base.WndProc(ref m);
+                //System.Diagnostics.Debug.WriteLine( Environment.TickCount + " Res " + ((int)m.Result));
+
+                if ((int)m.Result == HT_CLIENT)
+                {
+                    int x = unchecked((short)((uint)m.LParam & 0xFFFF));
+                    int y = unchecked((short)((uint)m.LParam >> 16));
+                    Point p = PointToClient(new Point(x, y));
+
+                    if (p.X > this.ClientSize.Width - statusStrip1.Height && p.Y > this.ClientSize.Height - statusStrip1.Height)
+                    {
+                        m.Result = (IntPtr)HT_BOTTOMRIGHT;
+                    }
+                    else if (p.Y > this.ClientSize.Height - statusStrip1.Height)
+                    {
+                        m.Result = (IntPtr)HT_BOTTOM;
+                    }
+                    else if (p.X > this.ClientSize.Width - 5)       // 5 is generous.. really only a few pixels gets thru before the subwindows grabs them
+                    {
+                        m.Result = (IntPtr)HT_RIGHT;
+                    }
+                    else if (p.X < 5)
+                    {
+                        m.Result = (IntPtr)HT_LEFT;
+                    }
+                    else if (!theme.WindowsFrame)
+                    {
+                        m.Result = (IntPtr)HT_CAPTION;
+                    }
+                }
+            }
+            else
+            {
+                base.WndProc(ref m);
+            }
+        }
+
         #endregion
 
         #region Update Data
@@ -1810,17 +1693,6 @@ namespace EDDiscovery
                 }
             }
 
-            MaterialCommoditiesLedger matcommodledger = new MaterialCommoditiesLedger();
-            StarScan starscan = new StarScan();
-
-            ProcessUserHistoryListEntries(hl, matcommodledger, starscan);      // here, we update the DBs in HistoryEntry and any global DBs in historylist
-
-            if (worker.CancellationPending)
-            {
-                e.Cancel = true;
-                return;
-            }
-
             if (jlistUpdated.Count > 0)
             {
                 worker.ReportProgress(-1, "Updating journal entries");
@@ -1845,6 +1717,13 @@ namespace EDDiscovery
                 }
             }
 
+            // now database has been updated due to initial fill, now fill in stuff which needs the user database
+
+            MaterialCommoditiesLedger matcommodledger = new MaterialCommoditiesLedger();
+            StarScan starscan = new StarScan();
+                             
+            ProcessUserHistoryListEntries(hl, matcommodledger, starscan);      // here, we update the DBs in HistoryEntry and any global DBs in historylist
+
             if (worker.CancellationPending)
             {
                 e.Cancel = true;
@@ -1866,6 +1745,7 @@ namespace EDDiscovery
                 else
                 {
                     travelHistoryControl1.LoadCommandersListBox();             // in case a new commander has been detected
+                    exportControl1.PopulateCommanders();
                     settings.UpdateCommandersListBox();
 
                     history.Clear();
@@ -1902,7 +1782,7 @@ namespace EDDiscovery
             ReportProgress(e.ProgressPercentage, $"Processing log file {name}");
         }
 
-        // go thru the hisotry list and reworkout the materials ledge and the materials count
+        // go thru the hisotry list and reworkout the materials ledge and the materials count, plus any other stuff..
         private void ProcessUserHistoryListEntries(List<HistoryEntry> hl, MaterialCommoditiesLedger ledger, StarScan scan)
         {
             using (SQLiteConnectionUser conn = new SQLiteConnectionUser())      // splitting the update into two, one using system, one using user helped
@@ -1911,7 +1791,7 @@ namespace EDDiscovery
                 {
                     HistoryEntry he = hl[i];
                     JournalEntry je = he.journalEntry;
-                    he.ProcessWithUserDb(je, (i > 0) ? hl[i - 1] : null, conn);        // let the HE do what it wants to with the user db
+                    he.ProcessWithUserDb(je, (i > 0) ? hl[i - 1] : null, history, conn);        // let the HE do what it wants to with the user db
 
                     Debug.Assert(he.MaterialCommodity != null);
 
@@ -1970,7 +1850,7 @@ namespace EDDiscovery
 
                 using (SQLiteConnectionUser conn = new SQLiteConnectionUser())
                 {
-                    he.ProcessWithUserDb(je, last, conn);           // let some processes which need the user db to work
+                    he.ProcessWithUserDb(je, last, history, conn);           // let some processes which need the user db to work
 
                     history.materialcommodititiesledger.Process(je, conn);
                 }
@@ -1989,13 +1869,11 @@ namespace EDDiscovery
 
                 if (OnNewEntry != null)
                     OnNewEntry(he,history);
-
-                if (je.EventTypeID == EliteDangerous.JournalTypeEnum.Scan)
-                    travelHistoryControl1.NewBodyScan(je as EliteDangerous.JournalEvents.JournalScan);
             }
 
             travelHistoryControl1.LoadCommandersListBox();  // because we may have new commanders
             settings.UpdateCommandersListBox();
+            exportControl1.PopulateCommanders();
         }
 
         public void RecalculateHistoryDBs()         // call when you need to recalc the history dbs - not the whole history. Use RefreshAsync for that
@@ -2015,22 +1893,17 @@ namespace EDDiscovery
 
         #endregion
 
+        #region Targets
 
-
-        private void sendUnsuncedEDDNEventsToolStripMenuItem_Click(object sender, EventArgs e)
+        public void NewTargetSet()
         {
-            List<HistoryEntry> hlsyncunsyncedlist = history.FilterByScanNotEDDNSynced;        // first entry is oldest
-            EDDNSync.SendEDDNEvents(this, hlsyncunsyncedlist);
+            System.Diagnostics.Debug.WriteLine("New target set");
+            if (OnNewTarget != null)
+                OnNewTarget();
         }
 
-        private void materialSearchToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            FindMaterialsForm frm = new FindMaterialsForm();
+        #endregion
 
-            frm.Show(this);
-
-
-        }
     }
 }
 

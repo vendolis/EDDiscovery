@@ -36,6 +36,7 @@ namespace EDDiscovery2
             SetEntryThemeComboBox();
 
             textBoxHomeSystem.SetAutoCompletor(EDDiscovery.DB.SystemClass.ReturnSystemListForAutoComplete);
+            comboBoxTheme.ItemHeight = 20;
         }
 
         void SetEntryThemeComboBox()
@@ -119,18 +120,22 @@ namespace EDDiscovery2
             dataGridViewCommanders.Update();
         }
 
+        private void dataGridViewCommanders_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            List<EDCommander> edcommanders = (List<EDCommander>)dataGridViewCommanders.DataSource;
+
+            EDDiscoveryForm.EDDConfig.UpdateCommanders(edcommanders,false);     // DONT update the data source.. that fucks it right up.
+
+            if ( e.ColumnIndex == 5 )                           // if changed journal location
+                _discoveryForm.RefreshHistoryAsync();           // will do a new parse on commander list adding/removing scanners
+        }
+
         private void buttonAddCommander_Click(object sender, EventArgs e)
         {
             EDDiscoveryForm.EDDConfig.GetNewCommander();
             UpdateCommandersListBox();
             _discoveryForm.TravelControl.LoadCommandersListBox();
-            _discoveryForm.RefreshHistoryAsync();           // will do a new parse on commander list adding/removing scanners
-        }
-
-        private void dataGridViewCommanders_CellEndEdit(object sender, DataGridViewCellEventArgs e)
-        {
-            List<EDCommander> edcommanders = (List<EDCommander>)dataGridViewCommanders.DataSource;
-            EDDiscoveryForm.EDDConfig.UpdateCommanders(edcommanders);
+            _discoveryForm.ExportControl.PopulateCommanders();
             _discoveryForm.RefreshHistoryAsync();           // will do a new parse on commander list adding/removing scanners
         }
 
@@ -156,6 +161,7 @@ namespace EDDiscovery2
                 {
                     EDDConfig.Instance.DeleteCommander(row);
                     _discoveryForm.TravelControl.LoadCommandersListBox();
+                    _discoveryForm.ExportControl.PopulateCommanders();
                     UpdateCommandersListBox();
                     _discoveryForm.RefreshHistoryAsync();           // will do a new parse on commander list adding/removing scanners
                 }

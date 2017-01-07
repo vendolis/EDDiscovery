@@ -218,7 +218,11 @@
     <Compile Include="DB\SQLiteConnectionSystem.cs" />
     <Compile Include="DB\SQLiteConnectionUser.cs" />
     <Compile Include="DB\TargetClass.cs" />
-    <Compile Include="DistanceParser.cs" />
+    <Compile Include="RoutingUtils.cs" />
+    <Compile Include="ExportImport\ExportNotes.cs" />
+    <Compile Include="ExportImport\ImportHistory.cs" />
+    <Compile Include="TraceLog.cs" />
+    <Compile Include="Trilateration\DistanceParser.cs" />
     <Compile Include="Controls\SplitContainerCustom.cs">
       <SubType>Component</SubType>
     </Compile>
@@ -355,20 +359,14 @@
     <Compile Include="EliteDangerous\Material.cs" />
     <Compile Include="EliteDangerous\StarScan.cs" />
     <Compile Include="EliteDangerous\Synthesis.cs" />
-    <Compile Include="Export\ExportExplorationData.cs" />
-    <Compile Include="Export\ExportFilteredSystems.cs" />
-    <Compile Include="Export\ExportRoute.cs" />
+    <Compile Include="ExportImport\ExportExplorationData.cs" />
+    <Compile Include="ExportImport\ExportFilteredSystems.cs" />
+    <Compile Include="ExportImport\ExportRoute.cs" />
     <Compile Include="Forms\FindMaterialsForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Forms\FindMaterialsForm.Designer.cs">
       <DependentUpon>FindMaterialsForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Forms\TripPanelPopOut.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Forms\TripPanelPopOut.Designer.cs">
-      <DependentUpon>TripPanelPopOut.cs</DependentUpon>
     </Compile>
     <Compile Include="Forms\JSONFiltersForm.cs">
       <SubType>Form</SubType>
@@ -386,15 +384,15 @@
     <Compile Include="JSON\JSONPrettyPrint.cs" />
     <Compile Include="EliteDangerous\LogReaderBase.cs" />
     <Compile Include="EliteDangerous\NetLogReader.cs" />
-    <Compile Include="Export\ExportBase.cs" />
-    <Compile Include="Export\ExportControl.cs">
+    <Compile Include="ExportImport\ExportBase.cs" />
+    <Compile Include="ExportImport\ExportControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="Export\ExportControl.Designer.cs">
+    <Compile Include="ExportImport\ExportControl.Designer.cs">
       <DependentUpon>ExportControl.cs</DependentUpon>
     </Compile>
-    <Compile Include="Export\ExportFSDJump.cs" />
-    <Compile Include="Export\ExportScan.cs" />
+    <Compile Include="ExportImport\ExportFSDJump.cs" />
+    <Compile Include="ExportImport\ExportScan.cs" />
     <Compile Include="Forms\AssignTravelLogSystemForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -442,12 +440,6 @@
     </Compile>
     <Compile Include="Forms\RecordStep.Designer.cs">
       <DependentUpon>RecordStep.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Forms\SummaryPopOut.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Forms\SummaryPopOut.Designer.cs">
-      <DependentUpon>SummaryPopOut.cs</DependentUpon>
     </Compile>
     <Compile Include="Forms\UserControlForm.cs">
       <SubType>Form</SubType>
@@ -536,7 +528,13 @@
     <Compile Include="3DMap\FormMap.Designer.cs">
       <DependentUpon>FormMap.cs</DependentUpon>
     </Compile>
-    <Compile Include="DataGridViewSorter.cs" />
+    <Compile Include="Trilateration\SysWarning.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Trilateration\SysWarning.Designer.cs">
+      <DependentUpon>SysWarning.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\DataGridViewSorter.cs" />
     <Compile Include="DB\SQLiteDBClass.cs" />
     <Compile Include="DB\SystemClass.cs" />
     <Compile Include="DB\SystemNoteClass.cs" />
@@ -615,7 +613,7 @@
     <Compile Include="TravelHistoryControl.Designer.cs">
       <DependentUpon>TravelHistoryControl.cs</DependentUpon>
     </Compile>
-    <Compile Include="TravelHistoryFilter.cs" />
+    <Compile Include="UserControls\TravelHistoryFilter.cs" />
     <Compile Include="Trilateration\TrilaterationControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
@@ -628,11 +626,29 @@
     <Compile Include="JournalViewControl.Designer.cs">
       <DependentUpon>JournalViewControl.cs</DependentUpon>
     </Compile>
+    <Compile Include="UserControls\UserControlNotePanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlNotePanel.Designer.cs">
+      <DependentUpon>UserControlNotePanel.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlRouteTracker.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlRouteTracker.Designer.cs">
+      <DependentUpon>UserControlRouteTracker.cs</DependentUpon>
+    </Compile>
     <Compile Include="UserControls\UserControlScan.cs">
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="UserControls\UserControlScan.Designer.cs">
       <DependentUpon>UserControlScan.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlSpanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlSpanel.Designer.cs">
+      <DependentUpon>UserControlSpanel.cs</DependentUpon>
     </Compile>
     <Compile Include="UserControls\UserControlStats.cs">
       <SubType>UserControl</SubType>
@@ -679,11 +695,23 @@
     <Compile Include="UserControls\UserControlStarDistance.Designer.cs">
       <DependentUpon>UserControlStarDistance.cs</DependentUpon>
     </Compile>
+    <Compile Include="UserControls\UserControlStatsTime.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlStatsTime.Designer.cs">
+      <DependentUpon>UserControlStatsTime.cs</DependentUpon>
+    </Compile>
     <Compile Include="UserControls\UserControlTravelGrid.cs">
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="UserControls\UserControlTravelGrid.Designer.cs">
       <DependentUpon>UserControlTravelGrid.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UserControls\UserControlTrippanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UserControls\UserControlTrippanel.Designer.cs">
+      <DependentUpon>UserControlTrippanel.cs</DependentUpon>
     </Compile>
     <Content Include="AppConfigLocal.xml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
@@ -702,9 +730,6 @@
     <EmbeddedResource Include="Forms\FindMaterialsForm.resx">
       <DependentUpon>FindMaterialsForm.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="Forms\TripPanelPopOut.resx">
-      <DependentUpon>TripPanelPopOut.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="Forms\JSONFiltersForm.resx">
       <DependentUpon>JSONFiltersForm.cs</DependentUpon>
     </EmbeddedResource>
@@ -716,6 +741,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Forms\UserControlForm.resx">
       <DependentUpon>UserControlForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Trilateration\SysWarning.resx">
+      <DependentUpon>SysWarning.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="UserControls\UserControlJournalGrid.resx">
       <DependentUpon>UserControlJournalGrid.cs</DependentUpon>
@@ -729,11 +757,20 @@
     <EmbeddedResource Include="UserControls\UserControlMaterialCommodities.resx">
       <DependentUpon>UserControlMaterialCommodities.cs</DependentUpon>
     </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlNotePanel.resx">
+      <DependentUpon>UserControlNotePanel.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlRouteTracker.resx">
+      <DependentUpon>UserControlRouteTracker.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="UserControls\UserControlScan.resx">
       <DependentUpon>UserControlScan.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="UserControls\UserControlScreenshot.resx">
       <DependentUpon>UserControlScreenshot.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlSpanel.resx">
+      <DependentUpon>UserControlSpanel.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="UserControls\UserControlStarDistance.resx">
       <DependentUpon>UserControlStarDistance.cs</DependentUpon>
@@ -741,8 +778,14 @@
     <EmbeddedResource Include="UserControls\UserControlStats.resx">
       <DependentUpon>UserControlStats.cs</DependentUpon>
     </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlStatsTime.resx">
+      <DependentUpon>UserControlStatsTime.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="UserControls\UserControlTravelGrid.resx">
       <DependentUpon>UserControlTravelGrid.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UserControls\UserControlTrippanel.resx">
+      <DependentUpon>UserControlTrippanel.cs</DependentUpon>
     </EmbeddedResource>
     <None Include="App.Portable.config" />
     <None Include="OpenTK.dll.config" />
@@ -824,6 +867,9 @@
     <None Include="Resources\Helium_Rich_Gas_Giant1.png" />
     <None Include="Resources\Globe.png" />
     <None Include="Resources\Globe_yellow.png" />
+    <None Include="Resources\edsm.png" />
+    <None Include="Resources\edlogo24.png" />
+    <None Include="Resources\edsm32x32.png" />
     <Content Include="Resources\imgCheck.png" />
     <None Include="Resources\stellaremnant.PNG" />
     <None Include="Resources\nebula.PNG" />
@@ -940,6 +986,7 @@
     <None Include="Resources\SizeSelectorsTiny.png" />
     <None Include="Resources\materialrare.png" />
     <None Include="Resources\Water_World_Poles_Cloudless4.png" />
+    <None Include="Resources\ImportHelp.txt" />
     <Content Include="x86\Microsoft.VC100.CRT\msvcp100.dll" />
     <Content Include="x86\Microsoft.VC100.CRT\msvcr100.dll" />
     <Content Include="x86\SQLite.Interop.dll">
@@ -969,7 +1016,7 @@
     <EmbeddedResource Include="3DMap\FormMap.resx">
       <DependentUpon>FormMap.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="Export\ExportControl.resx">
+    <EmbeddedResource Include="ExportImport\ExportControl.resx">
       <DependentUpon>ExportControl.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Forms\AboutForm.resx">
@@ -995,9 +1042,6 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Forms\RecordStep.resx">
       <DependentUpon>RecordStep.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Forms\SummaryPopOut.resx">
-      <DependentUpon>SummaryPopOut.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Forms\ThemeEditor.resx">
       <DependentUpon>ThemeEditor.cs</DependentUpon>

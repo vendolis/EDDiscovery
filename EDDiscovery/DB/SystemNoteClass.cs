@@ -71,7 +71,7 @@ namespace EDDiscovery2.DB
             }
         }
 
-        private bool Update(SQLiteConnectionUser cn)
+        public bool Update(SQLiteConnectionUser cn)
         {
             using (DbCommand cmd = cn.CreateCommand("Update SystemNote set Name=@Name, Time=@Time, Note=@Note, Journalid=@journalid, EdsmId=@EdsmId  where ID=@id")) 
             {
@@ -89,6 +89,19 @@ namespace EDDiscovery2.DB
 
             return true;
         }
+
+        public static void ClearEDSMID()
+        {
+            using (SQLiteConnectionUser cn = new SQLiteConnectionUser(utc: true))
+            {
+                using (DbCommand cmd = cn.CreateCommand("UPDATE SystemNote SET EdsmId=0"))
+                {
+                    SQLiteDBClass.SQLNonQueryText(cn, cmd);
+                }
+            }
+        }
+
+
 
         public static List<SystemNoteClass> globalSystemNotes = new List<SystemNoteClass>();
 

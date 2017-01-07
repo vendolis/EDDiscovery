@@ -13,10 +13,10 @@ namespace EDDiscovery2._3DMap
     {
         private FormMap _formMap;
 
-        public MapManager(bool nowindowreposition,TravelHistoryControl tc)
+        public MapManager(bool nowindowreposition,EDDiscoveryForm frm)
         {
             _formMap = new FormMap();
-            _formMap.travelHistoryControl = tc;
+            _formMap.discoveryForm = frm;
             _formMap.noWindowReposition = nowindowreposition;
         }
 
@@ -32,11 +32,6 @@ namespace EDDiscovery2._3DMap
             _formMap.SetPlannedRoute(plannedr);
         }
 
-        public void UpdateSystemList(List<HistoryEntry> visited)
-        {
-            _formMap.UpdateSystemList(visited);
-        }
-
         public void UpdateHistorySystem(ISystem historysel)
         {
             _formMap.UpdateHistorySystem(historysel);
@@ -50,11 +45,6 @@ namespace EDDiscovery2._3DMap
         public void UpdateNote()
         {
             _formMap.UpdateNote();
-        }
-
-        public void UpdateBookmarksGMO(bool gototarget )
-        {
-            _formMap.UpdateBookmarksGMO(gototarget);
         }
 
         public void Show()

@@ -49,6 +49,9 @@ namespace EDDiscovery
             this.wantedContextMenu = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.removeFromWantedSystemsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.viewOnEDSMToolStripMenuItem1 = new System.Windows.Forms.ToolStripMenuItem();
+            this.deleteAllWithKnownPositionToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.addAllLocalSystemsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.addAllEDSMSystemsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStrip1 = new System.Windows.Forms.ToolStrip();
             this.toolStripButtonSubmitDistances = new System.Windows.Forms.ToolStripButton();
             this.toolStripButtonNew = new System.Windows.Forms.ToolStripButton();
@@ -225,9 +228,12 @@ namespace EDDiscovery
             // 
             this.wantedContextMenu.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.removeFromWantedSystemsToolStripMenuItem,
-            this.viewOnEDSMToolStripMenuItem1});
+            this.viewOnEDSMToolStripMenuItem1,
+            this.deleteAllWithKnownPositionToolStripMenuItem,
+            this.addAllLocalSystemsToolStripMenuItem,
+            this.addAllEDSMSystemsToolStripMenuItem});
             this.wantedContextMenu.Name = "wantedContextMenu";
-            this.wantedContextMenu.Size = new System.Drawing.Size(234, 48);
+            this.wantedContextMenu.Size = new System.Drawing.Size(234, 114);
             // 
             // removeFromWantedSystemsToolStripMenuItem
             // 
@@ -242,6 +248,27 @@ namespace EDDiscovery
             this.viewOnEDSMToolStripMenuItem1.Size = new System.Drawing.Size(233, 22);
             this.viewOnEDSMToolStripMenuItem1.Text = "View on EDSM";
             this.viewOnEDSMToolStripMenuItem1.Click += new System.EventHandler(this.viewOnEDSMToolStripMenuItem1_Click);
+            // 
+            // deleteAllWithKnownPositionToolStripMenuItem
+            // 
+            this.deleteAllWithKnownPositionToolStripMenuItem.Name = "deleteAllWithKnownPositionToolStripMenuItem";
+            this.deleteAllWithKnownPositionToolStripMenuItem.Size = new System.Drawing.Size(233, 22);
+            this.deleteAllWithKnownPositionToolStripMenuItem.Text = "Delete all with known position";
+            this.deleteAllWithKnownPositionToolStripMenuItem.Click += new System.EventHandler(this.deleteAllWithKnownPositionToolStripMenuItem_Click);
+            // 
+            // addAllLocalSystemsToolStripMenuItem
+            // 
+            this.addAllLocalSystemsToolStripMenuItem.Name = "addAllLocalSystemsToolStripMenuItem";
+            this.addAllLocalSystemsToolStripMenuItem.Size = new System.Drawing.Size(233, 22);
+            this.addAllLocalSystemsToolStripMenuItem.Text = "Add all local systems";
+            this.addAllLocalSystemsToolStripMenuItem.Click += new System.EventHandler(this.addAllLocalSystemsToolStripMenuItem_Click);
+            // 
+            // addAllEDSMSystemsToolStripMenuItem
+            // 
+            this.addAllEDSMSystemsToolStripMenuItem.Name = "addAllEDSMSystemsToolStripMenuItem";
+            this.addAllEDSMSystemsToolStripMenuItem.Size = new System.Drawing.Size(233, 22);
+            this.addAllEDSMSystemsToolStripMenuItem.Text = "Add all EDSM systems";
+            this.addAllEDSMSystemsToolStripMenuItem.Click += new System.EventHandler(this.addAllEDSMSystemsToolStripMenuItem_Click);
             // 
             // toolStrip1
             // 
@@ -714,5 +741,8 @@ namespace EDDiscovery
         private DataViewScrollerPanel dataViewScroller_Wanted;
         private VScrollBarCustom vScrollBarCustom1;
         private VScrollBarCustom vScrollBarCustom2;
+        private System.Windows.Forms.ToolStripMenuItem deleteAllWithKnownPositionToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem addAllLocalSystemsToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem addAllEDSMSystemsToolStripMenuItem;
     }
 }

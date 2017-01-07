@@ -22,12 +22,16 @@ namespace EDDiscovery2
 {
     public partial class FormMap : Form
     {
+
+//TBD subscribe to new target
+
+
         #region Variables
 
         public bool Is3DMapsRunning { get { return _stargrids != null; } }
 
         public bool noWindowReposition { get; set; } = false;                       // set externally
-        public TravelHistoryControl travelHistoryControl { get; set; } = null;      // set externally
+        public EDDiscoveryForm discoveryForm { get; set; } = null;      // set externally
 
         const int HELP_VERSION = 5;         // increment this to force help onto the screen of users first time.
 
@@ -107,6 +111,7 @@ namespace EDDiscovery2
         KeyboardActions _kbdActions = new KeyboardActions();        // needed to be held because it remembers key downs
 
         bool _allowresizematrixchange = false;           // prevent resize causing matrix calc before paint
+        private OpenTK.GLControl glControl;
 
         #endregion
 
@@ -157,9 +162,9 @@ namespace EDDiscovery2
 
             if (toolStripDropDownButtonGalObjects.DropDownItems.Count == 0)
             {
-                Debug.Assert(EDDiscoveryForm.galacticMapping.galacticMapTypes != null);
+                Debug.Assert(discoveryForm.galacticMapping.galacticMapTypes != null);
 
-                foreach (GalMapType tp in EDDiscoveryForm.galacticMapping.galacticMapTypes)
+                foreach (GalMapType tp in discoveryForm.galacticMapping.galacticMapTypes)
                 {
                     if (tp.Group == GalMapType.GalMapGroup.Markers || tp.Group == GalMapType.GalMapGroup.Regions)       // only markers for now..
                     {
@@ -179,6 +184,13 @@ namespace EDDiscovery2
             }
 
             maprecorder.UpdateStoredVideosToolButton(toolStripDropDownRecord, LoadVideo, EDDiscovery.Properties.Resources.floppy);
+
+            discoveryForm.OnNewTarget -= UpdateTarget;  // in case called multi times
+            discoveryForm.OnNewTarget += UpdateTarget;
+            discoveryForm.OnHistoryChange -= UpdateSystemListHC;   // refresh, update the system list..
+            discoveryForm.OnHistoryChange += UpdateSystemListHC;   // refresh, update the system list..
+            discoveryForm.OnNewEntry -= UpdateSystemList;   // any new entries, update the system list..
+            discoveryForm.OnNewEntry += UpdateSystemList;
         }
 
         public ToolStripMenuItem AddGalMapButton( string name, Object tt, bool? checkedbut)
@@ -204,25 +216,6 @@ namespace EDDiscovery2
             RequestPaint();
         }
 
-        public void UpdateSystemList(List<HistoryEntry> visited)
-        {
-            if (Is3DMapsRunning && visited != null )         // if null, we are not up and running.  visited should never be null, but being defensive
-            {
-                _systemlist = visited;
-                _stargrids.FillSystemListGrid(_systemlist);          // update visited systems, will be displayed on next update of star grids
-                GenerateDataSetsSystemList();
-                RequestPaint();
-
-                if (toolStripButtonAutoForward.Checked)             // auto forward?
-                {
-                    HistoryEntry vs = _systemlist.FindLast(x => x.System.HasCoordinate );
-
-                    if ( vs != null )
-                        SetCenterSystemTo(vs.System.name);
-                }
-            }
-        }
-
         public void UpdateHistorySystem(ISystem historysel)
         {
             if (Is3DMapsRunning && historysel != null )         // if null, we are not up and running
@@ -240,24 +233,46 @@ namespace EDDiscovery2
             }
         }
 
-        public void UpdateBookmarksGMO(bool gototarget )
-        {
+        public void UpdateTarget()
+        { 
             if (Is3DMapsRunning)         // if null, we are not up and running
             {
+                System.Diagnostics.Debug.WriteLine("3dmap Refresh target");
+
                 GenerateDataSetsBNG();
-
-                if (gototarget)
-                {
-                    string name;
-                    double x, y, z;
-
-                    if (TargetClass.GetTargetPosition(out name, out x, out y, out z))
-                        posdir.StartCameraSlew(new Vector3((float)x, (float)y, (float)z),-1F);
-                }
-
                 RequestPaint();
             }
         }
+
+        public void UpdateSystemListHC(HistoryList hl)
+        {
+            UpdateSystemList(null, hl);
+        }
+
+        public void UpdateSystemList(HistoryEntry notused, HistoryList hl)
+        {
+            if (Is3DMapsRunning )
+            {
+                List<HistoryEntry> hfsd = hl.FilterByTravel;
+
+                if (hfsd.Count > 0)
+                {
+                    _systemlist = hfsd;
+                    _stargrids.FillSystemListGrid(_systemlist);          // update visited systems, will be displayed on next update of star grids
+                    GenerateDataSetsSystemList();
+                    RequestPaint();
+
+                    if (toolStripButtonAutoForward.Checked)             // auto forward?
+                    {
+                        HistoryEntry vs = _systemlist.FindLast(x => x.System.HasCoordinate);
+
+                        if (vs != null)
+                            SetCenterSystemTo(vs.System.name);
+                    }
+                }
+            }
+        }
+
 
         #endregion
 
@@ -267,6 +282,25 @@ namespace EDDiscovery2
         {
             InitializeComponent();
             OpenTK.Toolkit.Init();
+            // 
+            // glControl
+            // 
+            this.glControlContainer.SuspendLayout();
+            this.glControl = new GLControl();
+            this.glControl.Dock = DockStyle.Fill;
+            this.glControl.BackColor = System.Drawing.Color.Black;
+            this.glControl.Name = "glControl";
+            this.glControl.TabIndex = 0;
+            this.glControl.VSync = true;
+            this.glControl.Load += new System.EventHandler(this.glControl_Load);
+            this.glControl.Paint += new System.Windows.Forms.PaintEventHandler(this.glControl_Paint);
+            this.glControl.DoubleClick += new System.EventHandler(this.glControl_DoubleClick);
+            this.glControl.MouseDown += new System.Windows.Forms.MouseEventHandler(this.glControl_MouseDown);
+            this.glControl.MouseMove += new System.Windows.Forms.MouseEventHandler(this.glControl_MouseMove);
+            this.glControl.MouseUp += new System.Windows.Forms.MouseEventHandler(this.glControl_MouseUp);
+            this.glControl.MouseWheel += new System.Windows.Forms.MouseEventHandler(this.glControl_OnMouseWheel);
+            this.glControlContainer.Controls.Add(this.glControl);
+            this.glControlContainer.ResumeLayout();
         }
 
         private void FormMap_Load(object sender, EventArgs e)
@@ -402,7 +436,7 @@ namespace EDDiscovery2
             SQLiteDBClass.PutSettingBool("Map3DPerspective", toolStripButtonPerspective.Checked);
             SQLiteDBClass.PutSettingBool("Map3DGMONaming", _toolstripToggleNamingButton.Checked);
             SQLiteDBClass.PutSettingBool("Map3DGMORegionColouring", _toolstripToggleRegionColouringButton.Checked);
-            EDDiscoveryForm.galacticMapping.SaveSettings();
+            discoveryForm.galacticMapping.SaveSettings();
 
             _stargrids.Stop();
 
@@ -937,12 +971,12 @@ namespace EDDiscovery2
 
             DatasetBuilder builder3 = new DatasetBuilder();
             List<IData3DSet> oldgalmaps = _datasets_galmapobjects;
-            _datasets_galmapobjects = builder3.AddGalMapObjectsToDataset(maptarget, GetBitmapOnScreenSizeX(), GetBitmapOnScreenSizeY(), _lastcameranorm.Rotation, _toolstripToggleNamingButton.Checked, enableColoursToolStripMenuItem.Checked ? Color.White : Color.Orange );
+            _datasets_galmapobjects = builder3.AddGalMapObjectsToDataset(discoveryForm.galacticMapping, maptarget, GetBitmapOnScreenSizeX(), GetBitmapOnScreenSizeY(), _lastcameranorm.Rotation, _toolstripToggleNamingButton.Checked, enableColoursToolStripMenuItem.Checked ? Color.White : Color.Orange );
             DeleteDataset(ref oldgalmaps);
 
             DatasetBuilder builder4 = new DatasetBuilder();
             List<IData3DSet> oldgalreg = _datasets_galmapregions;
-            _datasets_galmapregions = builder4.AddGalMapRegionsToDataset(_toolstripToggleRegionColouringButton.Checked);
+            _datasets_galmapregions = builder4.AddGalMapRegionsToDataset(discoveryForm.galacticMapping, _toolstripToggleRegionColouringButton.Checked);
             DeleteDataset(ref oldgalreg);
 
             if (_clickedGMO != null)              // if GMO marked.
@@ -1196,7 +1230,7 @@ namespace EDDiscovery2
                 int v = (int)tmsi.Tag;
                 if ( v == 0 )
                 {
-                    EDDiscoveryForm.galacticMapping.ToggleEnable();
+                    discoveryForm.galacticMapping.ToggleEnable();
                     
                     foreach (ToolStripMenuItem ti in toolStripDropDownButtonGalObjects.DropDownItems)
                     {
@@ -1207,7 +1241,7 @@ namespace EDDiscovery2
             }
             else
             {
-                EDDiscoveryForm.galacticMapping.ToggleEnable((GalMapType)tmsi.Tag);
+                discoveryForm.galacticMapping.ToggleEnable((GalMapType)tmsi.Tag);
             }
 
             GenerateDataSetsBNG();
@@ -1291,7 +1325,7 @@ namespace EDDiscovery2
                 if (frm.IsTarget)          // asked for targetchanged..
                 {
                     TargetClass.SetTargetBookmark("RM:" + newcls.Heading, newcls.id, newcls.x, newcls.y, newcls.z);
-                    travelHistoryControl.RefreshTargetInfo();
+                    discoveryForm.NewTargetSet();
                 }
 
                 GenerateDataSetsBNG();
@@ -1576,98 +1610,10 @@ namespace EDDiscovery2
                 _mouseStartTranslateXY = new Point(int.MinValue, int.MinValue);         // indicate rotation is finished.
                 _mouseStartTranslateXZ = new Point(int.MinValue, int.MinValue);
 
-                if (cursystem != null || curbookmark != null)      // if we have a system or a bookmark..
-                {                                                   // try and find the associated bookmark..
-                    BookmarkClass bkmark = (curbookmark != null) ? curbookmark : BookmarkClass.bookmarks.Find(x => x.StarName != null && x.StarName.Equals(cursystem.name));
-
-                    SystemNoteClass sn = (cursystem != null) ? SystemNoteClass.GetNoteOnSystem(cursystem.name, cursystem.id_edsm) : null;
-                    string note = (sn != null) ? sn.Note : "";
-
-                    BookmarkForm frm = new BookmarkForm();
-
-                    if (notedsystem && bkmark == null)              // note on a system
-                    {
-                        long targetid = TargetClass.GetTargetNotedSystem();      // who is the target of a noted system (0=none)
-                        long noteid = sn.id;
-
-                        frm.InitialisePos(cursystem.x, cursystem.y, cursystem.z);
-                        frm.NotedSystem(cursystem.name, note, noteid == targetid);       // note may be passed in null
-                        frm.ShowDialog();
-
-                        if ((frm.IsTarget && targetid != noteid) || (!frm.IsTarget && targetid == noteid)) // changed..
-                        {
-                            if (frm.IsTarget)
-                                TargetClass.SetTargetNotedSystem(cursystem.name, noteid, cursystem.x, cursystem.y, cursystem.z);
-                            else
-                                TargetClass.ClearTarget();
-                        }
-                    }
-                    else
-                    {
-                        bool regionmarker = false;
-                        DateTime tme;
-
-                        long targetid = TargetClass.GetTargetBookmark();      // who is the target of a bookmark (0=none)
-
-                        if (bkmark == null)                         // new bookmark
-                        {
-                            frm.InitialisePos(cursystem.x, cursystem.y, cursystem.z);
-                            tme = DateTime.Now;
-                            frm.NewSystemBookmark(cursystem.name, note, tme.ToString());
-                        }
-                        else                                        // update bookmark
-                        {
-                            frm.InitialisePos(bkmark.x, bkmark.y, bkmark.z);
-                            regionmarker = bkmark.isRegion;
-                            tme = bkmark.Time;
-                            frm.Update(regionmarker ? bkmark.Heading : bkmark.StarName, note, bkmark.Note, tme.ToString(), regionmarker, targetid == bkmark.id);
-                        }
-
-                        DialogResult res = frm.ShowDialog();
-
-                        if (res == DialogResult.OK)
-                        {
-                            BookmarkClass newcls = new BookmarkClass();
-
-                            if (regionmarker)
-                                newcls.Heading = frm.StarHeading;
-                            else
-                                newcls.StarName = frm.StarHeading;
-
-                            newcls.x = double.Parse(frm.x);
-                            newcls.y = double.Parse(frm.y);
-                            newcls.z = double.Parse(frm.z);
-                            newcls.Time = tme;
-                            newcls.Note = frm.Notes;
-
-                            if (bkmark != null)
-                            {
-                                newcls.id = bkmark.id;
-                                newcls.Update();
-                            }
-                            else
-                                newcls.Add();
-
-                            if ((frm.IsTarget && targetid != newcls.id) || (!frm.IsTarget && targetid == newcls.id)) // changed..
-                            {
-                                if (frm.IsTarget)
-                                    TargetClass.SetTargetBookmark(regionmarker ? ("RM:" + newcls.Heading) : newcls.StarName, newcls.id, newcls.x, newcls.y, newcls.z);
-                                else
-                                    TargetClass.ClearTarget();
-                            }
-                        }
-                        else if (res == DialogResult.Abort && bkmark != null)
-                        {
-                            if (targetid == bkmark.id)
-                            {
-                                TargetClass.ClearTarget();
-                            }
-
-                            bkmark.Delete();
-                        }
-                    }
-
-                    travelHistoryControl.RefreshTargetInfo();       // because of all the ways it may have changed
+                if (cursystem != null || curbookmark != null)      // if we have a system or a bookmark...
+                {
+                    //Moved the code so that it could be shared with SavedRouteExpeditionControl
+                    RoutingUtils.showBookmarkForm(discoveryForm , cursystem, curbookmark, notedsystem);
                     GenerateDataSetsBNG();      // in case target changed, do all..
                     RequestPaint();
                 }
@@ -1693,12 +1639,14 @@ namespace EDDiscovery2
 
                             GenerateDataSetsBNG();
                             RequestPaint();
-                            travelHistoryControl.RefreshTargetInfo();
+                            discoveryForm.NewTargetSet();
                         }
                     }
                 }
             }
         }
+
+   
 
         private void glControl_DoubleClick(object sender, EventArgs e)
         {
@@ -2081,9 +2029,9 @@ namespace EDDiscovery2
             Matrix4 resmat = posdir.GetResMat;
             GalacticMapObject curobj = null;
 
-            if (EDDiscoveryForm.galacticMapping != null)
+            if (discoveryForm.galacticMapping != null)
             {
-                foreach (GalacticMapObject gmo in EDDiscoveryForm.galacticMapping.galacticMapObjects)
+                foreach (GalacticMapObject gmo in discoveryForm.galacticMapping.galacticMapObjects)
                 {
                     if (gmo.galMapType.Enabled && gmo.galMapType.Group == GalMapType.GalMapGroup.Markers && gmo.points.Count > 0)             // if it is Enabled and has a co-ord, and is a marker type (routes/regions rejected)
                     {
@@ -2252,7 +2200,7 @@ namespace EDDiscovery2
                 return sys.name;
             }
 
-            gmo = EDDiscoveryForm.galacticMapping.Find(textboxFrom.Text, true, true);    // ignore if its off, find any part of string, find if disabled
+            gmo = discoveryForm.galacticMapping.Find(textboxFrom.Text, true, true);    // ignore if its off, find any part of string, find if disabled
 
             if (gmo != null)
             {

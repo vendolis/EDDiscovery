@@ -157,6 +157,15 @@ namespace EDDiscovery.EliteDangerous.JournalEvents
 
         //public string MaterialsString { get { return jEventData["Materials"].ToString(); } }
 
+
+         public bool IsEDSMBody
+        {
+            get
+            {
+                return JSONHelper.GetBool(jEventData["EDDFromEDSMBodie"], false);
+            }
+        }
+
         public override void FillInformation(out string summary, out string info, out string detailed)
         {
             base.FillInformation(out summary, out info, out detailed);
@@ -220,7 +229,8 @@ namespace EDDiscovery.EliteDangerous.JournalEvents
                 scanText.AppendFormat("Gravity: {0:0.0}g\n", nSurfaceGravity.Value / 9.8);
 
             if (nSurfacePressure.HasValue && nSurfacePressure.Value > 0.00 && !PlanetClass.ToLower().Contains("gas"))
-                scanText.AppendFormat("Surface Pressure: {0} Atmospheres\n", (nSurfacePressure.Value / 100000).ToString("N2"));
+                if (nSurfacePressure.Value > 1000) { scanText.AppendFormat("Surface Pressure: {0} Atmospheres\n", (nSurfacePressure.Value / 100000).ToString("N2")); }
+                else { { scanText.AppendFormat("Surface Pressure: {0} Pa\n", (nSurfacePressure.Value).ToString("N2")); } }
 
             if (Volcanism != null)
                 scanText.AppendFormat("Volcanism: {0}\n", Volcanism == String.Empty ? "No Volcanism" : System.Threading.Thread.CurrentThread.CurrentCulture.TextInfo.
@@ -268,7 +278,10 @@ namespace EDDiscovery.EliteDangerous.JournalEvents
                 {
                     scanText.AppendFormat("Belt{0}", Rings.Count() == 1 ? ":" : "s:");
                     for (int i = 0; i < Rings.Length; i++)
-                        scanText.Append("\n" + RingInformation(i, 1.0/oneMoon_MT, " Moons"));
+                    {
+                        if (Rings[i].MassMT > 7342000000) { scanText.Append("\n" + RingInformation(i, 1.0 / oneMoon_MT, " Moons")); }
+                        else { scanText.Append("\n" + RingInformation(i)); }
+                    }
                 }
                 else
                 {
