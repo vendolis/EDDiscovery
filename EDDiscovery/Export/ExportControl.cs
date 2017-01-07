@@ -33,6 +33,7 @@ namespace EDDiscovery
             exportTypeList.Add(new ExportTypeClass("Travel history", new ExportFSDJump()));
             exportTypeList.Add(new ExportTypeClass("Sold exploration data (all)", new ExportExplorationData(false)));
             exportTypeList.Add(new ExportTypeClass("Sold exploration data (By date)", new ExportExplorationData(true)));
+            exportTypeList.Add(new ExportTypeClass("Route plan", new ExportRoute()));
 
             txtExportVisited.SetAutoCompletor(EDDiscovery.DB.SystemClass.ReturnSystemListForAutoComplete);
 
@@ -82,10 +83,16 @@ namespace EDDiscovery
                     exptype.export.Csvformat = CSVFormat.USA_UK;
 
                 exptype.export.IncludeHeader = checkBoxCustomIncludeHeader.Checked;
-                exptype.export.GetData(_discoveryForm);
-                exptype.export.ToCSV(dlg.FileName);
+
+                //Check for failed getdata or failed CSV
+                if (!exptype.export.GetData(_discoveryForm))
+                    return;
+                if (!exptype.export.ToCSV(dlg.FileName))
+                    return;
+
                 if (checkBoxCustomAutoOpen.Checked)
-                    Process.Start(dlg.FileName);
+                        Process.Start(dlg.FileName);
+                
             }
 
         }

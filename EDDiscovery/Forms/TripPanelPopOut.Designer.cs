@@ -38,6 +38,8 @@
             this.contextMenuStrip1 = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.setFuelTankToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.setFuelWarningToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.refreshToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.setShipDetailsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.contextMenuStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -110,9 +112,11 @@
             // 
             this.contextMenuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.setFuelTankToolStripMenuItem,
-            this.setFuelWarningToolStripMenuItem});
+            this.setFuelWarningToolStripMenuItem,
+            this.setShipDetailsToolStripMenuItem,
+            this.refreshToolStripMenuItem});
             this.contextMenuStrip1.Name = "contextMenuStrip1";
-            this.contextMenuStrip1.Size = new System.Drawing.Size(160, 70);
+            this.contextMenuStrip1.Size = new System.Drawing.Size(160, 114);
             // 
             // setFuelTankToolStripMenuItem
             // 
@@ -127,6 +131,20 @@
             this.setFuelWarningToolStripMenuItem.Size = new System.Drawing.Size(159, 22);
             this.setFuelWarningToolStripMenuItem.Text = "Set fuel warning";
             this.setFuelWarningToolStripMenuItem.Click += new System.EventHandler(this.setFuelWarningToolStripMenuItem_Click);
+            // 
+            // refreshToolStripMenuItem
+            // 
+            this.refreshToolStripMenuItem.Name = "refreshToolStripMenuItem";
+            this.refreshToolStripMenuItem.Size = new System.Drawing.Size(159, 22);
+            this.refreshToolStripMenuItem.Text = "Refresh";
+            this.refreshToolStripMenuItem.Click += new System.EventHandler(this.refreshToolStripMenuItem_Click);
+            // 
+            // setShipDetailsToolStripMenuItem
+            // 
+            this.setShipDetailsToolStripMenuItem.Name = "setShipDetailsToolStripMenuItem";
+            this.setShipDetailsToolStripMenuItem.Size = new System.Drawing.Size(159, 22);
+            this.setShipDetailsToolStripMenuItem.Text = "Set ship details";
+            this.setShipDetailsToolStripMenuItem.Click += new System.EventHandler(this.setShipDetailsToolStripMenuItem_Click);
             // 
             // TripPanelPopOut
             // 
@@ -163,5 +181,7 @@
         private System.Windows.Forms.ContextMenuStrip contextMenuStrip1;
         private System.Windows.Forms.ToolStripMenuItem setFuelTankToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem setFuelWarningToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem refreshToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem setShipDetailsToolStripMenuItem;
     }
 }

@@ -27,7 +27,9 @@ namespace EDDiscovery
         internal bool changesilence = false;
         private List<SystemClass> routeSystems;
         string lastsys = null;
-        
+
+        public List<SystemClass>  RouteSystems { get {return routeSystems;} }
+
         // METRICs defined by systemclass GetSystemNearestTo function
         string[] metric_options = { "Nearest to Waypoint", "Minimum Deviation from Path",
                                     "Nearest to Waypoint with dev<=100ly", "Nearest to Waypoint with dev<=250ly",
@@ -320,7 +322,7 @@ namespace EDDiscovery
             return worked;
         }
 
-        private bool GetCoordsTo(out Point3D pos)
+        public bool GetCoordsTo(out Point3D pos)
         {
             double x = 0, y = 0, z = 0;
 

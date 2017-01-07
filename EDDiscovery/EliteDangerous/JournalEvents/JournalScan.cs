@@ -95,6 +95,14 @@ namespace EDDiscovery.EliteDangerous.JournalEvents
             VolcanismID = Bodies.VolcanismStr2Enum(Volcanism, out VolcanismProperty);
         }
 
+
+
+        private void ConvertFromEDSMBodies()
+        {
+            EventTimeUTC = DateTime.UtcNow;
+            throw new NotImplementedException();
+        }
+
         public string BodyName { get; set; }
         public double DistanceFromArrivalLS { get; set; }
         public string StarType { get; set; }                            // null if no StarType
@@ -149,7 +157,11 @@ namespace EDDiscovery.EliteDangerous.JournalEvents
 
         //public string MaterialsString { get { return jEventData["Materials"].ToString(); } }
 
-        
+        public override void FillInformation(out string summary, out string info, out string detailed)
+        {
+            base.FillInformation(out summary, out info, out detailed);
+            summary = $"Scan of {BodyName}";
+        }
 
         public string DisplayString(bool printbodyname = true, int indent = 0)
         {
@@ -273,8 +285,9 @@ namespace EDDiscovery.EliteDangerous.JournalEvents
 
             if (IsStar)
             {
-                scanText.Append("\n");
-                scanText.Append(HabitableZone());
+                string hz = HabitableZone();
+                if ( hz != null )
+                    scanText.Append("\n" + hz);
             }
 
             if (scanText.Length > 0 && scanText[scanText.Length - 1] == '\n')
@@ -582,15 +595,20 @@ namespace EDDiscovery.EliteDangerous.JournalEvents
         
         private string HabitableZone()
         {
-            StringBuilder habZone = new StringBuilder();
-            habZone.AppendFormat("Habitable Zone Approx. {0}ls to {1}ls\n", 
-                DistanceForBlackBodyTemperature(315).ToString("N0"), 
-                DistanceForBlackBodyTemperature(223).ToString("N0"));
-            if (nSemiMajorAxis.HasValue && nSemiMajorAxis.Value > 0)
+            if (nRadius.HasValue && nSurfaceTemperature.HasValue)
             {
-                habZone.AppendFormat(" (This star only, others not considered)\n");
-            }                                
-            return habZone.ToNullSafeString(); 
+                StringBuilder habZone = new StringBuilder();
+                habZone.AppendFormat("Habitable Zone Approx. {0}ls to {1}ls\n",
+                    DistanceForBlackBodyTemperature(315).ToString("N0"),
+                    DistanceForBlackBodyTemperature(223).ToString("N0"));
+                if (nSemiMajorAxis.HasValue && nSemiMajorAxis.Value > 0)
+                {
+                    habZone.AppendFormat(" (This star only, others not considered)\n");
+                }
+                return habZone.ToNullSafeString();
+            }
+            else
+                return null;
         }
 
     }
